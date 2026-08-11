@@ -1,0 +1,1370 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Prášek SLM">
+<meta name="theme-color" content="#e7eaed">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<title>Prášek — sledování toku materiálu SLM</title>
+<style>
+:root{
+  --bg:#e7eaed; --surface:#ffffff; --surface-2:#f2f4f6; --inset:#eef1f3;
+  --ink:#1a1e23; --ink-soft:#5b636c; --ink-faint:#8a929b;
+  --line:#d5dae0; --line-strong:#c2c9d1;
+  --accent:#1f6187; --accent-ink:#fff; --accent-soft:#e4eef4; --accent-deep:#164a68;
+  --est:#6b5aa6; --est-soft:#ece8f5;
+  --ok:#1f7a4d; --ok-soft:#e2f1e8;
+  --warn:#9a6512; --warn-soft:#f7ecd6;
+  --danger:#b0342d; --danger-soft:#f6e0de;
+  --shadow:0 1px 2px rgba(20,30,40,.06), 0 4px 14px rgba(20,30,40,.06);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --r:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:var(--sans); background:var(--bg); color:var(--ink); font-size:16px; line-height:1.45;
+  -webkit-text-size-adjust:100%; padding-bottom:env(safe-area-inset-bottom)}
+button{font-family:inherit}
+svg{flex:0 0 auto}
+.hide{display:none !important}
+
+header{position:sticky; top:0; z-index:20; background:rgba(231,234,237,.85);
+  backdrop-filter:saturate(1.4) blur(10px); -webkit-backdrop-filter:saturate(1.4) blur(10px);
+  border-bottom:1px solid var(--line); padding:env(safe-area-inset-top) 0 0 0}
+.bar{display:flex; align-items:center; gap:12px; padding:11px 18px; flex-wrap:wrap}
+.brand{display:flex; align-items:center; gap:11px; margin-right:auto}
+.logo{width:34px; height:34px; border-radius:9px; background:var(--ink); position:relative; flex:0 0 auto}
+.logo::before{content:""; position:absolute; left:6px; right:6px; bottom:6px; height:12px; border-radius:2px;
+  background:linear-gradient(180deg,#8b939c 0 40%,#6b737c 40% 100%)}
+.logo::after{content:""; position:absolute; left:9px; top:8px; width:5px; height:5px; border-radius:50%; background:#cfd5db;
+  box-shadow:8px 2px 0 #cfd5db, 4px 6px 0 #b9c0c7}
+.brand h1{font-size:.98rem; letter-spacing:.14em; margin:0; font-weight:700; text-transform:uppercase}
+.brand p{margin:0; font-size:.66rem; letter-spacing:.1em; color:var(--ink-faint); text-transform:uppercase}
+.hb{display:flex; align-items:center; gap:9px}
+.who{display:flex; align-items:center; gap:7px; background:var(--surface); border:1px solid var(--line);
+  padding:6px 8px 6px 12px; border-radius:999px; box-shadow:var(--shadow)}
+.who span{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint)}
+.who select{border:0; background:transparent; font:inherit; font-size:.9rem; font-weight:600; color:var(--ink); padding:2px 4px; max-width:150px}
+.who select:focus{outline:none}
+.undo{display:flex; align-items:center; gap:7px; background:var(--surface); border:1px solid var(--line);
+  padding:8px 14px; border-radius:999px; box-shadow:var(--shadow); font-size:.87rem; font-weight:650; color:var(--ink); cursor:pointer}
+.undo:disabled{opacity:.42; cursor:default; box-shadow:none}
+
+nav{display:flex; gap:2px; padding:0 12px; overflow-x:auto}
+nav button{border:0; background:transparent; padding:12px 16px 13px; font-size:.92rem; font-weight:600; color:var(--ink-soft);
+  border-bottom:2.5px solid transparent; cursor:pointer; white-space:nowrap}
+nav button[aria-current="true"]{color:var(--accent-deep); border-bottom-color:var(--accent)}
+
+main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
+.viewhead{display:flex; align-items:baseline; gap:12px; margin:2px 0 18px; flex-wrap:wrap}
+.viewhead h2{font-size:1.15rem; margin:0; letter-spacing:-.01em}
+.viewhead .sub{font-size:.86rem; color:var(--ink-soft)}
+
+/* ---- machine cards ---- */
+.cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:16px}
+.card{background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--c,#b9c0c7);
+  border-radius:var(--r); box-shadow:var(--shadow); overflow:hidden}
+.card-top{display:flex; align-items:center; gap:9px; padding:14px 16px 12px; flex-wrap:wrap}
+.card-top .name{font-size:1.06rem; font-weight:700; letter-spacing:-.01em}
+.card-top .mat{display:inline-flex; align-items:center; gap:7px; font-size:.84rem; font-weight:650;
+  background:var(--inset); padding:4px 11px; border-radius:999px}
+.card-top .mat .d{width:9px; height:9px; border-radius:50%}
+.card-top .mat.empty{color:var(--ink-faint)}
+.stat{margin-left:auto; display:inline-flex; align-items:center; gap:7px; font-size:.76rem; font-weight:700;
+  padding:4px 11px; border-radius:999px; letter-spacing:.02em}
+.stat.run{background:var(--ok-soft); color:var(--ok)}
+.stat.idle{background:var(--inset); color:var(--ink-faint)}
+.stat .p{width:8px; height:8px; border-radius:50%; background:currentColor}
+.stat.run .p{animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+.zones{display:grid; grid-template-columns:1fr 1fr 1fr; gap:1px; background:var(--line); border-top:1px solid var(--line)}
+.zone{background:var(--surface-2); padding:11px 13px 12px; min-width:0}
+.zone .z-lbl{font-size:.62rem; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-faint); font-weight:700}
+.zone .z-val{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:1.26rem; font-weight:600;
+  letter-spacing:-.02em; margin-top:3px; line-height:1.05; white-space:nowrap}
+.zone .z-val .u{font-size:.66rem; color:var(--ink-faint); font-weight:500; margin-left:2px}
+.zone .z-tag{font-size:.61rem; color:var(--ink-faint); margin-top:2px}
+.zone.exact{background:var(--accent-soft)}
+.zone.est{background:var(--est-soft)}
+.zone.est .z-val{color:var(--est)}
+.zone.est .z-tag{color:var(--est)}
+.zone.na .z-val{color:var(--ink-faint)}
+
+.prog{padding:13px 16px; border-top:1px solid var(--line)}
+.prog-head{display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap}
+.prog-head .l{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:.92rem; font-weight:650}
+.prog-head .r{font-size:.8rem; color:var(--ink-soft)}
+.prog-bar{height:9px; border-radius:999px; background:var(--inset); overflow:hidden}
+.prog-fill{height:100%; background:var(--accent); border-radius:999px; transition:width .4s}
+.prog-foot{display:flex; justify-content:space-between; gap:10px; margin-top:8px; font-size:.82rem; flex-wrap:wrap}
+.prog-foot .need{color:var(--est); font-weight:650}
+.prog-foot .need b{font-family:var(--mono)}
+.prog-foot .cfg{color:var(--ink-faint); font-size:.78rem}
+.alert{margin:11px 16px 0; padding:9px 12px; border-radius:10px; font-size:.83rem; font-weight:600;
+  background:var(--warn-soft); color:var(--warn)}
+.alert.bad{background:var(--danger-soft); color:var(--danger)}
+.card-foot{padding:9px 16px; border-top:1px solid var(--line); background:var(--surface-2);
+  font-size:.8rem; color:var(--ink-soft); display:flex; gap:14px; flex-wrap:wrap}
+.card-foot b{font-family:var(--mono); color:var(--ink)}
+.card-acts{display:flex; gap:8px; padding:12px 14px 14px; flex-wrap:wrap; border-top:1px solid var(--line)}
+.card-acts button{flex:1 1 auto; min-width:104px; border:1px solid var(--line-strong); background:var(--surface);
+  border-radius:10px; padding:10px 11px; font-size:.85rem; font-weight:650; color:var(--ink); cursor:pointer}
+.card-acts button:disabled{opacity:.4; cursor:default}
+.card-acts button.pri{background:var(--accent); color:#fff; border-color:var(--accent)}
+.card-acts button.est{background:var(--est); color:#fff; border-color:var(--est)}
+.card-acts button.stop{background:var(--surface); color:var(--danger); border-color:var(--danger-soft)}
+.card-acts .sep{flex:1 0 100%; height:0}
+
+/* ---- sklad ---- */
+.matblock{background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--c);
+  border-radius:var(--r); box-shadow:var(--shadow); margin-bottom:16px; overflow:hidden}
+.matblock-head{display:flex; align-items:center; gap:11px; padding:14px 17px; flex-wrap:wrap}
+.matblock-head .nm{font-size:1.04rem; font-weight:700}
+.matblock-head .dot{width:12px; height:12px; border-radius:50%; background:var(--c)}
+.matblock-head .stats{margin-left:auto; display:flex; gap:18px; flex-wrap:wrap}
+.matblock-head .st{text-align:right}
+.matblock-head .st .k{font-size:.61rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); font-weight:700}
+.matblock-head .st .v{font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:650; font-size:1.02rem}
+.thead,.trow{display:grid; grid-template-columns:64px minmax(0,1fr) 118px 132px minmax(0,1.1fr); gap:12px; align-items:center; padding:9px 17px}
+.thead{font-size:.61rem; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-faint); font-weight:700;
+  border-top:1px solid var(--line); background:var(--surface-2)}
+.trow{border-top:1px solid var(--line); font-size:.9rem}
+.trow.zero{color:var(--ink-faint)}
+.trow .cnum{font-weight:700; font-family:var(--mono)}
+.trow .cmass{font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:650; text-align:right}
+.trow .cmass .u{font-size:.66rem; color:var(--ink-faint); font-weight:500}
+.trow .cbatch{font-size:.83rem; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.tag{display:inline-block; font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap}
+.tag.ok{background:var(--ok-soft); color:var(--ok)}
+.tag.warn{background:var(--warn-soft); color:var(--warn)}
+.tag.muted{background:var(--inset); color:var(--ink-faint)}
+.tnote{font-size:.78rem; color:var(--ink-faint)}
+.matblock-foot{padding:11px 17px; border-top:1px solid var(--line); font-size:.83rem; color:var(--ink-soft);
+  display:flex; gap:16px; flex-wrap:wrap; background:var(--surface-2)}
+.matblock-foot b{font-family:var(--mono); color:var(--ink)}
+
+/* ---- ops ---- */
+.ops{display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:13px}
+.op{display:flex; align-items:flex-start; gap:13px; text-align:left; background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r); padding:15px; cursor:pointer; box-shadow:var(--shadow); min-height:86px}
+.op:hover{border-color:var(--line-strong)}
+.op .ico{width:40px; height:40px; border-radius:11px; background:var(--accent-soft); color:var(--accent-deep);
+  display:flex; align-items:center; justify-content:center}
+.op.warn-op .ico{background:var(--warn-soft); color:var(--warn)}
+.op.danger-op .ico{background:var(--danger-soft); color:var(--danger)}
+.op.est-op .ico{background:var(--est-soft); color:var(--est)}
+.op .t{font-size:.99rem; font-weight:700; display:block}
+.op .d{font-size:.79rem; color:var(--ink-soft); line-height:1.3; display:block; margin-top:2px}
+.op-group{grid-column:1/-1; font-size:.66rem; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint);
+  font-weight:700; margin:8px 2px 0}
+.op-group:first-child{margin-top:0}
+
+/* ---- history ---- */
+.filters{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px}
+.filters button{border:1px solid var(--line); background:var(--surface); padding:7px 13px; border-radius:999px;
+  font-size:.83rem; font-weight:600; color:var(--ink-soft); cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--ink); color:#fff; border-color:var(--ink)}
+.log{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); overflow:hidden}
+.log-row{display:grid; grid-template-columns:128px 1fr auto; gap:12px; align-items:center; padding:12px 16px; border-top:1px solid var(--line)}
+.log-row:first-child{border-top:0}
+.log-row.voided{background:var(--surface-2)}
+.log-when{font-family:var(--mono); font-size:.73rem; color:var(--ink-faint); line-height:1.3}
+.log-mid{min-width:0}
+.log-line1{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.log-flow{font-size:.85rem; color:var(--ink-soft); margin-top:3px}
+.log-flow b{color:var(--ink); font-weight:600}
+.log-note{font-size:.77rem; color:var(--ink-faint); margin-top:2px}
+.log-amt{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:1.02rem; font-weight:650; text-align:right; white-space:nowrap}
+.log-amt.neg{color:var(--danger)} .log-amt.pos{color:var(--ok)} .log-amt.est{color:var(--est); font-size:.94rem}
+.log-amt .u{font-size:.66rem; color:var(--ink-faint); font-weight:500}
+.tchip{font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap}
+.tchip.in{background:var(--ok-soft); color:var(--ok)}
+.tchip.machine{background:var(--accent-soft); color:var(--accent-deep)}
+.tchip.move{background:#e7edf2; color:#3d5975}
+.tchip.loss{background:var(--danger-soft); color:var(--danger)}
+.tchip.adjust{background:var(--inset); color:var(--ink-soft)}
+.tchip.event{background:var(--warn-soft); color:var(--warn)}
+.tchip.job{background:var(--est-soft); color:var(--est)}
+.tchip.void{background:#3a3f45; color:#fff}
+.matmini{display:inline-flex; align-items:center; gap:6px; font-size:.8rem; font-weight:600}
+.matmini .d{width:8px; height:8px; border-radius:50%}
+
+/* ---- settings ---- */
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); margin-bottom:16px; overflow:hidden}
+.panel h3{margin:0; padding:14px 17px; font-size:.95rem; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:9px}
+.panel h3 .ph-ico{width:26px; height:26px; border-radius:7px; background:var(--inset); color:var(--ink-soft);
+  display:flex; align-items:center; justify-content:center}
+.panel-body{padding:15px 17px}
+.list-row{display:flex; align-items:center; gap:11px; padding:11px 0; border-top:1px solid var(--line); flex-wrap:wrap}
+.list-row:first-child{border-top:0}
+.list-row .grow{flex:1; min-width:140px}
+.list-row .r-title{font-weight:650}
+.list-row .r-sub{font-size:.79rem; color:var(--ink-soft); font-family:var(--mono)}
+.swatch{width:16px; height:16px; border-radius:5px}
+.mini-btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:6px 11px; font-size:.82rem;
+  font-weight:600; cursor:pointer; color:var(--ink-soft)}
+.mini-btn.danger{color:var(--danger); border-color:var(--danger-soft)}
+.cfg-group{margin-bottom:6px}
+.cfg-group .gh{font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint);
+  padding:9px 0 4px; display:flex; align-items:center; gap:8px}
+.cfg-group .gh .sw{width:9px; height:9px; border-radius:50%}
+.cfg-row{display:grid; grid-template-columns:78px 92px 1fr 1fr auto; gap:10px; align-items:center;
+  padding:9px 0; border-top:1px solid var(--line); font-size:.87rem}
+.cfg-row .k{font-family:var(--mono); font-weight:650}
+.cfg-row .v{font-family:var(--mono); font-variant-numeric:tabular-nums}
+.cfg-row .lbl{font-size:.68rem; color:var(--ink-faint); display:block}
+.settings-actions{display:flex; gap:10px; flex-wrap:wrap}
+
+.btn{border:0; border-radius:11px; padding:13px 20px; font-size:.95rem; font-weight:700; cursor:pointer;
+  background:var(--accent); color:var(--accent-ink); box-shadow:var(--shadow)}
+.btn:hover{background:var(--accent-deep)}
+.btn.secondary{background:var(--surface); color:var(--ink); border:1px solid var(--line-strong); box-shadow:none}
+.btn.danger{background:var(--danger)}
+.btn.warn{background:var(--warn)}
+.btn.est{background:var(--est)}
+
+.empty{text-align:center; padding:44px 20px; color:var(--ink-soft)}
+.empty .big{font-size:1.05rem; font-weight:650; color:var(--ink); margin-bottom:6px}
+.empty p{max-width:440px; margin:0 auto 16px}
+
+/* ---- modal ---- */
+.backdrop{position:fixed; inset:0; z-index:60; background:rgba(20,26,32,.42); display:none; align-items:flex-end; justify-content:center}
+.backdrop.show{display:flex}
+@media(min-width:640px){ .backdrop{align-items:center; padding:24px} }
+.modal{background:var(--surface); width:100%; max-width:540px; border-radius:20px 20px 0 0;
+  box-shadow:0 -8px 40px rgba(0,0,0,.2); max-height:93vh; display:flex; flex-direction:column}
+@media(min-width:640px){ .modal{border-radius:18px} }
+.modal-head{display:flex; align-items:center; gap:12px; padding:18px 20px 12px}
+.modal-head .m-ico{width:38px; height:38px; border-radius:10px; background:var(--accent-soft); color:var(--accent-deep);
+  display:flex; align-items:center; justify-content:center}
+.modal-head h3{margin:0; font-size:1.1rem}
+.modal-head .x{margin-left:auto; border:0; background:var(--inset); width:32px; height:32px; border-radius:50%;
+  font-size:1.2rem; color:var(--ink-soft); cursor:pointer; line-height:1}
+.modal-body{padding:4px 20px 8px; overflow-y:auto}
+.modal-info{background:var(--inset); border-radius:11px; padding:11px 14px; font-size:.85rem; color:var(--ink-soft); margin-bottom:14px}
+.modal-info .k{color:var(--ink-faint)}
+.modal-info b{font-family:var(--mono); color:var(--ink); font-weight:650}
+.modal-info.warn{background:var(--warn-soft); color:var(--warn)} .modal-info.warn b{color:var(--warn)}
+.modal-info.danger{background:var(--danger-soft); color:var(--danger)}
+.modal-info.est{background:var(--est-soft); color:var(--est)} .modal-info.est b{color:var(--est)}
+.fld{display:block; margin-bottom:14px}
+.fld-row{display:flex; gap:12px}
+.fld-row .fld{flex:1}
+.fldlabel{display:block; font-size:.78rem; font-weight:650; color:var(--ink-soft); margin-bottom:6px}
+.inp{width:100%; border:1px solid var(--line-strong); border-radius:11px; padding:13px 14px; font:inherit; font-size:1rem;
+  background:var(--surface); color:var(--ink); -webkit-appearance:none}
+.inp:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.inp.big{font-family:var(--mono); font-size:1.3rem; font-weight:600; text-align:right; padding-right:48px}
+.inp-wrap{position:relative}
+.inp-wrap .suffix{position:absolute; right:16px; top:50%; transform:translateY(-50%); color:var(--ink-faint);
+  font-size:.9rem; font-weight:600; pointer-events:none}
+.fldhint{display:block; font-size:.76rem; color:var(--ink-faint); margin-top:5px}
+.dhm{display:flex; gap:8px; align-items:center}
+.dhm .u{flex:1; position:relative}
+.dhm .u input{width:100%; border:1px solid var(--line-strong); border-radius:11px; padding:13px 40px 13px 14px;
+  font:inherit; font-family:var(--mono); font-size:1.15rem; font-weight:600; text-align:right; background:var(--surface)}
+.dhm .u span{position:absolute; right:13px; top:50%; transform:translateY(-50%); color:var(--ink-faint); font-size:.85rem; font-weight:600}
+.radios{display:flex; gap:8px; flex-wrap:wrap}
+.radios label{flex:1; min-width:96px; border:1px solid var(--line-strong); border-radius:11px; padding:11px; text-align:center;
+  font-weight:600; font-size:.9rem; cursor:pointer; color:var(--ink-soft); position:relative}
+.radios input{position:absolute; opacity:0; pointer-events:none}
+.radios label:has(input:checked){border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep)}
+.check{display:flex; align-items:center; gap:10px; font-size:.9rem; padding:8px 0; cursor:pointer}
+.check input{width:20px; height:20px}
+.modal-err{color:var(--danger); font-size:.86rem; font-weight:600; padding:0 20px; min-height:1.2em}
+.modal-foot{display:flex; gap:10px; padding:12px 20px calc(18px + env(safe-area-inset-bottom))}
+.modal-foot .btn{flex:1}
+.computed{background:var(--inset); border-radius:11px; padding:12px 14px; margin-bottom:14px; display:flex;
+  justify-content:space-between; align-items:center; gap:10px}
+.computed .k{font-size:.82rem; color:var(--ink-soft); font-weight:600}
+.computed .v{font-family:var(--mono); font-size:1.24rem; font-weight:650; white-space:nowrap}
+.computed .v.neg{color:var(--danger)}
+.computed.big .v{font-size:1.5rem}
+.computed.est{background:var(--est-soft)} .computed.est .v{color:var(--est)} .computed.est .k{color:var(--est)}
+
+.toast{position:fixed; left:50%; bottom:calc(26px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(20px);
+  background:var(--ink); color:#fff; padding:12px 20px; border-radius:12px; font-weight:600; font-size:.92rem;
+  box-shadow:0 8px 30px rgba(0,0,0,.28); opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:80; max-width:90vw}
+.upd{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(26px + env(safe-area-inset-bottom));
+  background:var(--accent); color:#fff; padding:9px 10px 9px 18px; border-radius:13px; display:none; align-items:center;
+  gap:12px; box-shadow:0 8px 30px rgba(0,0,0,.3); z-index:90; font-size:.9rem; font-weight:650; max-width:92vw}
+.upd.show{display:flex}
+.upd button{border:0; background:rgba(255,255,255,.22); color:#fff; font-family:inherit; font-weight:700;
+  font-size:.88rem; padding:9px 15px; border-radius:9px; cursor:pointer}
+.upd button:hover{background:rgba(255,255,255,.32)}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--danger)}
+
+footer{max-width:1120px; margin:0 auto; padding:8px 18px 30px; color:var(--ink-faint); font-size:.76rem;
+  display:flex; gap:14px; flex-wrap:wrap; align-items:center}
+footer .sep{width:1px; height:12px; background:var(--line-strong)}
+
+@media (prefers-reduced-motion:reduce){ *{animation:none !important; transition:none !important} }
+@media (max-width:640px){
+  .thead{display:none}
+  .trow{grid-template-columns:58px 1fr auto; gap:8px 10px; padding:11px 15px}
+  .trow .cbatch{grid-column:2/4} .trow .cmass{grid-row:1; grid-column:3}
+  .trow .cdry,.trow .cstate{grid-column:2/4}
+  .log-row{grid-template-columns:1fr auto} .log-when{grid-column:1/-1; order:-1}
+  .cfg-row{grid-template-columns:1fr 1fr auto; gap:8px}
+  .brand p{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><div class="logo" aria-hidden="true"></div>
+      <div><h1>Prášek</h1><p>SLM · sledování toku materiálu</p></div></div>
+    <div class="hb">
+      <label class="who"><span>Obsluha</span><select id="opSel" aria-label="Aktuální obsluha"></select></label>
+      <button class="undo" id="undoBtn" disabled>↩ <span id="undoLbl">Zpět</span></button>
+    </div>
+  </div>
+  <nav id="nav">
+    <button data-view="prehled" aria-current="true">Přehled</button>
+    <button data-view="sklad">Sklad</button>
+    <button data-view="operace">Operace</button>
+    <button data-view="historie">Historie</button>
+    <button data-view="nastaveni">Nastavení</button>
+  </nav>
+</header>
+<main id="main"></main>
+<footer>
+  <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
+  <span id="storeMode">IndexedDB</span><span class="sep"></span>
+  <span>v3.1 · sklad + odhady tisku</span><span class="sep"></span>
+  <span id="lastSaved"></span>
+</footer>
+
+<div class="backdrop" id="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head"><div class="m-ico" id="modalIco"></div><h3 id="modalTitle"></h3>
+      <button class="x" id="modalX" aria-label="Zavřít">×</button></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-err" id="modalErr"></div>
+    <div class="modal-foot"><button class="btn secondary" id="modalCancel">Zrušit</button>
+      <button class="btn" id="modalSubmit">Uložit</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<div class="upd" id="updBar"><span>Je dostupná nová verze</span><button id="updBtn">Aktualizovat</button></div>
+
+<script>
+"use strict";
+/* ===================== utils ===================== */
+const q=(s,r)=>(r||document).querySelector(s);
+const qa=(s,r)=>[...(r||document).querySelectorAll(s)];
+const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
+const now=()=>Date.now();
+const r1=x=>Math.round((x+Number.EPSILON)*10)/10;
+const EPS=0.05;
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const esc=s=>(''+(s==null?'':s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function parseG(v){ v=(''+v).replace(/\s|\u00a0/g,'').trim(); if(v==='')return NaN;
+  if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.');
+  else if((v.match(/\./g)||[]).length>1) v=v.replace(/\./g,'');
+  const n=parseFloat(v); return isNaN(n)?NaN:r1(n); }
+const parseNum=v=>{ const n=parseFloat((''+v).replace(/\s|\u00a0/g,'').replace(',','.')); return isNaN(n)?NaN:n; };
+function fmtG(x){ const r=r1(x||0), neg=r<0, a=Math.abs(r); const i=Math.floor(a), d=Math.round((a-i)*10);
+  let s=String(i).replace(/\B(?=(\d{3})+(?!\d))/g,'\u00a0'); if(d>0)s+=','+d; return (neg?'−':'')+s; }
+const fmtInt=n=>String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'\u00a0');
+const fmtDate=ts=>new Date(ts).toLocaleDateString('cs-CZ',{day:'2-digit',month:'2-digit',year:'numeric'});
+const fmtTime=ts=>new Date(ts).toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'});
+const dISO=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const todayISO=()=>dISO(new Date());
+const dayAge=iso=>(now()-new Date(iso+'T00:00:00').getTime())/86400000;
+function fmtDur(ms){ if(ms<0)ms=0; const m=Math.floor(ms/60000), d=Math.floor(m/1440), h=Math.floor((m%1440)/60), mm=m%60;
+  if(d>0)return `${d} d ${h} h ${mm} m`; if(h>0)return `${h} h ${mm} m`; return `${mm} m`; }
+
+/* ===================== storage ===================== */
+const Store=(()=>{
+  const DB='sklad_slm', ST='app', KEY='state'; let mem=null, useMem=false;
+  const open=()=>new Promise((res,rej)=>{ const r=indexedDB.open(DB,1);
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(ST)) r.result.createObjectStore(ST); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+  return{ mode:()=>useMem?'Paměť (bez uložení)':'IndexedDB',
+    async load(){ if(useMem)return mem;
+      try{ const db=await open(); return await new Promise((res,rej)=>{ const t=db.transaction(ST,'readonly').objectStore(ST).get(KEY);
+        t.onsuccess=()=>res(t.result||null); t.onerror=()=>rej(t.error); }); }catch(e){ console.warn(e); useMem=true; return mem; } },
+    async save(s){ if(useMem){ mem=s; return; }
+      try{ const db=await open(); await new Promise((res,rej)=>{ const tx=db.transaction(ST,'readwrite');
+        tx.objectStore(ST).put(JSON.parse(JSON.stringify(s)),KEY); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+      catch(e){ console.warn(e); useMem=true; mem=s; } } };
+})();
+
+/* ===================== locations ===================== */
+const L={SUPPLIER:'SUPPLIER',WASTE:'WASTE',DISPOSAL:'DISPOSAL',CORR:'KOREKCE',PARTS:'PARTS'};
+const MACH=id=>'MACHINE:'+id, CONT=id=>'CONTAINER:'+id, BOTT=m=>'BOTTLES:'+m;
+
+/* ===================== state ===================== */
+let state=null, view='prehled', histFilter='all', modalSubmit=null, ticker=null;
+const MAT_COLORS=['#3b6ea5','#b5651d','#4a7c59','#7d5ba6','#b03a5b','#2b8a8a','#9a7d0a','#5a6b7d'];
+
+function defaultState(){
+  const a=uid(), b=uid(), op=uid(), m1=uid(), m2=uid();
+  return { version:3,
+    materials:[{id:a,name:'AlSi10Mg',color:'#3b6ea5',density:2.67},{id:b,name:'316L',color:'#b5651d',density:7.99}],
+    machines:[{id:m1,name:'Stroj 1',materialId:null},{id:m2,name:'Stroj 2',materialId:null}],
+    operators:[{id:op,name:'Obsluha 1'}],
+    configs:[
+      {id:uid(),machineId:m1,materialId:a,layerHeight:30,grooves:40,massPerGroove:1.2,fillRate:180},
+      {id:uid(),machineId:m1,materialId:a,layerHeight:30,grooves:60,massPerGroove:1.2,fillRate:240},
+      {id:uid(),machineId:m1,materialId:a,layerHeight:60,grooves:60,massPerGroove:1.2,fillRate:300}
+    ],
+    jobs:[], batches:[], containers:[], movements:[], events:[], voids:[], undo:[],
+    settings:{dryingWarnDays:14}, currentOperatorId:op };
+}
+function migrate(s){
+  s.materials=s.materials||[]; s.operators=s.operators||[]; s.batches=s.batches||[]; s.containers=s.containers||[];
+  s.movements=s.movements||[]; s.events=s.events||[]; s.voids=s.voids||[]; s.undo=s.undo||[];
+  s.settings=s.settings||{}; if(s.settings.dryingWarnDays==null)s.settings.dryingWarnDays=14;
+  if(!s.version||s.version<2){
+    const m={id:uid(),name:'Stroj 1',materialId:(s.machine&&s.machine.materialId)||null};
+    s.machines=[m,{id:uid(),name:'Stroj 2',materialId:null}];
+    s.movements.forEach(mv=>{ mv.amount=r1((mv.amount||0)*1000);
+      if(mv.from==='MACHINE'){mv.from=MACH(m.id); mv.machineId=m.id;}
+      if(mv.to==='MACHINE'){mv.to=MACH(m.id); mv.machineId=m.id;} });
+    s.materials.forEach(x=>{delete x.maxCycles; delete x.minStock;});
+    s.batches.forEach(b=>{delete b.certificate; delete b.supplier;});
+    delete s.machine; s.version=2;
+  }
+  s.machines=s.machines||[{id:uid(),name:'Stroj 1',materialId:null}];
+  if(s.version<3){ s.configs=s.configs||[]; s.jobs=s.jobs||[]; s.version=3; }
+  s.configs=s.configs||[]; s.jobs=s.jobs||[];
+  return s;
+}
+const matById=id=>state.materials.find(m=>m.id===id);
+const machById=id=>state.machines.find(m=>m.id===id);
+const contById=id=>state.containers.find(c=>c.id===id);
+const batchById=id=>state.batches.find(b=>b.id===id);
+const opById=id=>state.operators.find(o=>o.id===id);
+const cfgById=id=>state.configs.find(c=>c.id===id);
+
+/* balances — přesná vrstva (gramy) */
+function balances(){ const b={}; for(const m of state.movements){ b[m.to]=(b[m.to]||0)+m.amount; b[m.from]=(b[m.from]||0)-m.amount; } return b; }
+const cMass=(b,id)=>r1(b[CONT(id)]||0);
+const mMass=(b,id)=>r1(b[MACH(id)]||0);
+const botMass=(b,mat)=>r1(b[BOTT(mat)]||0);
+const skladMass=(b,mat)=>r1(state.containers.filter(c=>c.materialId===mat).reduce((a,c)=>a+cMass(b,c.id),0));
+
+/* ===================== MODUL 2 — odhady tisku ===================== */
+const configsFor=(mid,mat)=>state.configs.filter(c=>c.machineId===mid&&c.materialId===mat);
+const heightsFor=(mid,mat)=>[...new Set(configsFor(mid,mat).map(c=>c.layerHeight))].sort((a,b)=>a-b);
+const groovesFor=(mid,mat,h)=>[...new Set(configsFor(mid,mat).filter(c=>c.layerHeight===h).map(c=>c.grooves))].sort((a,b)=>a-b);
+const findConfig=(mid,mat,h,g)=>state.configs.find(c=>c.machineId===mid&&c.materialId===mat&&c.layerHeight===h&&c.grooves===g);
+const runningJob=mid=>state.jobs.find(j=>j.machineId===mid&&j.status==='running');
+const jobEnd=j=>j.startTs+j.totalMs;
+const lastSeg=j=>j.segments[j.segments.length-1];
+const segEndTs=(j,s)=>s.endTs!=null?s.endTs:(j.status==='running'?now():j.endTs);
+
+/* vrstva v čase — uzavřený segment interpoluje mezi zadanými vrstvami,
+   otevřený segment míří na celkový počet vrstev v zadaném čase tisku */
+function layerInSeg(j,s,ts){
+  if(s.endTs!=null){
+    if(s.endTs<=s.startTs) return s.endLayer;
+    return s.startLayer + clamp((ts-s.startTs)/(s.endTs-s.startTs),0,1)*(s.endLayer-s.startLayer);
+  }
+  const remMs=j.totalMs-(s.startTs-j.startTs), remL=j.totalLayers-s.startLayer;
+  if(remMs<=0) return j.totalLayers;
+  return clamp(s.startLayer+(ts-s.startTs)/remMs*remL, s.startLayer, j.totalLayers);
+}
+function currentLayer(j){ return j.status==='running'? layerInSeg(j,lastSeg(j),Math.min(now(),jobEnd(j))) : j.endLayer; }
+function jobProgress(j){ if(j.status!=='running')return 1; return clamp((now()-j.startTs)/j.totalMs,0,1); }
+const segConsumed=(j,s,a,b)=>Math.max(0,layerInSeg(j,s,b)-layerInSeg(j,s,a))*s.grooves*s.massPerGroove;
+
+/* spotřeba (ze zásobníku do komory) v časovém okně */
+function consumedIn(mid,t0,t1){
+  let g=0;
+  for(const j of state.jobs){ if(j.machineId!==mid)continue;
+    for(const s of j.segments){ const a=Math.max(t0,s.startTs), b=Math.min(t1,segEndTs(j,s));
+      if(b>a) g+=segConsumed(j,s,a,b); } }
+  return g;
+}
+/* poslední reset přepadů: odebrání přepadů / změna materiálu / korekce */
+function lastOvfReset(mid){
+  let t=0; for(const m of state.movements){ if(m.machineId!==mid)continue;
+    if(['odebrani_prepadu','zmena_materialu','korekce'].includes(m.type)&&m.ts>t) t=m.ts; }
+  return t;
+}
+/* poslední tvrdá kotva zásobníku: změna materiálu (0) nebo korekce (zvážená hodnota) */
+function lastTankAnchor(mid){
+  let t=0, base=0;
+  for(const m of state.movements){ if(m.machineId!==mid)continue;
+    if(m.type==='zmena_materialu'&&m.ts>=t){ t=m.ts; base=0; }
+    else if(m.type==='korekce'&&m.ts>=t){ t=m.ts; base=m.meas!=null?m.meas:0; } }
+  return {ts:t,base};
+}
+function tankEst(mid){
+  const {ts,base}=lastTankAnchor(mid); let g=base;
+  for(const m of state.movements){ if(m.machineId!==mid||m.ts<ts)continue;
+    if(m.type==='naplneni'||(m.type==='preseti'&&m.to===MACH(mid))) g+=m.amount;
+    else if(m.type==='vyprazdneni') g-=m.amount; }
+  g-=consumedIn(mid,ts,now());
+  return clamp(r1(g),0,mMass(balances(),mid));
+}
+function ovfEst(mid){
+  const t0=lastOvfReset(mid), t1=now(); let g=0;
+  for(const j of state.jobs){ if(j.machineId!==mid)continue;
+    for(const s of j.segments){ const a=Math.max(t0,s.startTs), b=Math.min(t1,segEndTs(j,s));
+      if(b>a) g+=s.fillRate*(b-a)/3600000; } }
+  return clamp(r1(g),0,mMass(balances(),mid));
+}
+/* materiál potřebný do konce tisku při aktuální konfiguraci */
+function needToFinish(j){ const s=lastSeg(j);
+  return r1(Math.max(0,j.totalLayers-currentLayer(j))*s.grooves*s.massPerGroove); }
+/* automatické ukončení odpočtem */
+function tickJobs(){ let ch=false;
+  for(const j of state.jobs){ if(j.status!=='running')continue;
+    if(now()>=jobEnd(j)){ const s=lastSeg(j); s.endTs=jobEnd(j); s.endLayer=j.totalLayers;
+      j.status='done'; j.endTs=jobEnd(j); j.endLayer=j.totalLayers; j.finish='auto';
+      addEvent({type:'job_stop',ts:jobEnd(j),machineId:j.machineId,jobId:j.id,layer:j.totalLayers,
+        consumed:jobConsumedTotal(j),operatorId:j.operatorId,auto:true}); ch=true; } }
+  return ch;
+}
+function jobConsumedTotal(j){ let g=0; for(const s of j.segments) g+=segConsumed(j,s,s.startTs,segEndTs(j,s)); return r1(g); }
+
+/* ===================== undo ===================== */
+function pushUndo(label){
+  state.undo.push({label,ts:now(),snap:JSON.stringify({movements:state.movements,events:state.events,
+    containers:state.containers,batches:state.batches,machines:state.machines,jobs:state.jobs})});
+  while(state.undo.length>30) state.undo.shift();
+}
+function undoLast(){ const u=state.undo.pop(); if(!u)return; const s=JSON.parse(u.snap);
+  state.movements=s.movements; state.events=s.events; state.containers=s.containers;
+  state.batches=s.batches; state.machines=s.machines; state.jobs=s.jobs||[];
+  state.voids.push({id:uid(),ts:now(),operatorId:state.currentOperatorId,label:u.label});
+  save(); toast('Anulováno: '+u.label); }
+function addMovement(mv){ mv.id=uid(); mv.ts=mv.ts||now(); mv.amount=r1(mv.amount); state.movements.push(mv); }
+function addEvent(ev){ ev.id=uid(); ev.ts=ev.ts||now(); state.events.push(ev); }
+function newBatch(materialId,kind,extra={}){ const m=matById(materialId);
+  const n=state.batches.filter(x=>x.materialId===materialId&&x.kind===kind).length+1;
+  const pfx=kind==='virgin'?'':(kind==='blend'?'MIX-':'REC-');
+  const bt={id:uid(),materialId,kind,cycles:extra.cycles!=null?extra.cycles:(kind==='virgin'?0:1),
+    code:(extra.code||'').trim()||`${m?m.name:'MAT'}-${pfx}${n}`,createdAt:now(),parents:extra.parents||[]};
+  state.batches.push(bt); return bt; }
+async function save(){ render(); await Store.save(state); const el=q('#lastSaved'); if(el) el.textContent='uloženo '+fmtTime(now()); }
+
+/* ===================== icons ===================== */
+const P={
+  prijem:'<path d="M12 3v10m0 0l-3.5-3.5M12 13l3.5-3.5"/><path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/>',
+  suseni:'<path d="M6 15c0-2 2-2.5 2-4.5M11 15c0-2 2-2.5 2-4.5M16 15c0-2 2-2.5 2-4.5"/><path d="M4 19h16"/>',
+  naplneni:'<rect x="14.5" y="5" width="5.5" height="14" rx="1"/><path d="M3 12h9m0 0l-3-3m3 3l-3 3"/>',
+  prepady:'<rect x="14.5" y="5" width="5.5" height="14" rx="1"/><path d="M6 16V6m0 0L3 9m3-3l3 3"/>',
+  preseti:'<path d="M4 5h16l-6 7.2V18l-4 2v-7.8L4 5z"/>',
+  flasky:'<path d="M6 7h12M9.5 7V5.2A1.2 1.2 0 0110.7 4h2.6A1.2 1.2 0 0114.5 5.2V7M7.5 7l.9 12.2A1 1 0 009.4 20h5.2a1 1 0 001-.8L16.5 7"/>',
+  vyprazdneni:'<rect x="4" y="5" width="6" height="14" rx="1"/><path d="M13 12h8m0 0l-3-3m3 3l-3 3"/>',
+  zmena:'<path d="M4 8h12m0 0l-3-3m3 3l-3 3"/><path d="M20 16H8m0 0l3-3m-3 3l3 3"/>',
+  korekce:'<path d="M4 8h9M17 8h3M4 16h3M11 16h9"/><circle cx="15" cy="8" r="2"/><circle cx="9" cy="16" r="2"/>',
+  stroj:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/>',
+  obsluha:'<circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/>',
+  data:'<ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/>',
+  start:'<circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5V8.5z"/>',
+  stop:'<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
+  drazky:'<path d="M4 7h16M4 12h16M4 17h16"/><path d="M8 4v3M14 9v3M10 14v3"/>',
+  cfg:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>'
+};
+const ico=(n,s)=>`<svg width="${s||22}" height="${s||22}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${P[n]||''}</svg>`;
+
+const TYPE={ prijem:{l:'Příjem',c:'in'}, naplneni:{l:'Naplnění stroje',c:'machine'},
+  odebrani_prepadu:{l:'Odebrání přepadů',c:'move'}, preseti:{l:'Přesetí',c:'move'},
+  flasky_prazdne:{l:'Flašky prázdné',c:'loss'}, vyprazdneni:{l:'Vyprázdnění stroje',c:'move'},
+  zmena_materialu:{l:'Změna materiálu',c:'loss'}, korekce:{l:'Korekce stroje',c:'adjust'} };
+function locName(loc){
+  if(loc===L.SUPPLIER)return'Dodavatel'; if(loc===L.WASTE)return'Odpad'; if(loc===L.DISPOSAL)return'Likvidace';
+  if(loc===L.CORR)return'Korekce'; if(loc===L.PARTS)return'Hotové díly'; if(!loc)return'—';
+  if(loc.startsWith('MACHINE:')){ const m=machById(loc.slice(8)); return m?m.name:'Stroj'; }
+  if(loc.startsWith('CONTAINER:')){ const c=contById(loc.slice(10)); if(!c)return'Kontejner';
+    const m=matById(c.materialId); return `Kontejner ${m?m.name+' ':''}č. ${c.number}`; }
+  if(loc.startsWith('BOTTLES:')){ const m=matById(loc.slice(8)); return `Flašky ${m?m.name:''}`.trim(); }
+  return loc; }
+const matMini=m=>`<span class="matmini"><span class="d" style="background:${m.color}"></span>${esc(m.name)}</span>`;
+function dryTag(c,mass){ if(mass<=EPS)return`<span class="tag muted">prázdný</span>`;
+  if(!c.dryingDate)return`<span class="tag warn">nevysušeno</span>`;
+  const age=Math.floor(dayAge(c.dryingDate)), w=state.settings.dryingWarnDays;
+  const d=fmtDate(new Date(c.dryingDate+'T00:00:00').getTime());
+  return (w&&age>w)?`<span class="tag warn">${d} · ${age} d</span>`:`<span class="tag ok">${d}</span>`; }
+
+/* ===================== render ===================== */
+function render(){
+  const sel=q('#opSel');
+  sel.innerHTML=`<option value="">— vyberte —</option>`+state.operators.map(o=>
+    `<option value="${o.id}" ${o.id===state.currentOperatorId?'selected':''}>${esc(o.name)}</option>`).join('');
+  const ub=q('#undoBtn'), last=state.undo[state.undo.length-1];
+  ub.disabled=!last; q('#undoLbl').textContent=last?'Zpět: '+last.label:'Zpět';
+  qa('#nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.view===view?'true':'false'));
+  const m=q('#main');
+  if(view==='prehled')m.innerHTML=vPrehled();
+  else if(view==='sklad')m.innerHTML=vSklad();
+  else if(view==='operace')m.innerHTML=vOperace();
+  else if(view==='historie'){m.innerHTML=vHistorie(); qa('.filters button').forEach(b=>b.onclick=()=>{histFilter=b.dataset.f;render();});}
+  else if(view==='nastaveni')m.innerHTML=vNastaveni();
+  q('#storeMode').textContent=Store.mode();
+}
+const emptyBox=(big,txt,btn,fn)=>`<div class="empty"><div class="big">${big}</div><p>${txt}</p>${btn?`<button class="btn" onclick="${fn}">${btn}</button>`:''}</div>`;
+function go(v){ view=v; render(); window.scrollTo(0,0); }
+
+function vPrehled(){
+  if(!state.machines.length) return `<div class="viewhead"><h2>Přehled strojů</h2></div>`+
+    emptyBox('Zatím žádné stroje','Přidejte stroje v Nastavení — systém jich zvládne libovolný počet.','Přejít do Nastavení',"go('nastaveni')");
+  const b=balances();
+  const cards=state.machines.map(mc=>{
+    const mat=mc.materialId?matById(mc.materialId):null;
+    const total=mMass(b,mc.id), j=runningJob(mc.id);
+    const tank=mat?tankEst(mc.id):0, ovf=mat?ovfEst(mc.id):0;
+    const bott=mat?botMass(b,mat.id):0;
+    let prog='', alert='', need=0;
+    if(j){
+      const cl=currentLayer(j), pct=jobProgress(j)*100, s=lastSeg(j);
+      need=needToFinish(j);
+      prog=`<div class="prog">
+        <div class="prog-head"><span class="l">vrstva ${fmtInt(cl)} / ${fmtInt(j.totalLayers)}</span>
+          <span class="r">${Math.round(pct)} % · zbývá ${fmtDur(jobEnd(j)-now())}</span></div>
+        <div class="prog-bar"><div class="prog-fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="prog-foot"><span class="need">Do konce ~<b>${fmtG(need)} g</b></span>
+          <span class="cfg">${j.layerHeight} µm · ${s.grooves} drážek · ${fmtG(s.massPerGroove)} g/drážku</span></div></div>`;
+      if(need>tank+EPS) alert=`<div class="alert bad">Zásobník nemusí vystačit — odhad ${fmtG(tank)} g, do konce je potřeba ~${fmtG(need)} g.</div>`;
+    }
+    return `<div class="card" style="--c:${mat?mat.color:'#b9c0c7'}">
+      <div class="card-top"><span class="name">${esc(mc.name)}</span>
+        ${mat?`<span class="mat"><span class="d" style="background:${mat.color}"></span>${esc(mat.name)}</span>`
+             :`<span class="mat empty">bez materiálu</span>`}
+        <span class="stat ${j?'run':'idle'}"><span class="p"></span>${j?'Tiskne':'Netiskne'}</span></div>
+      <div class="zones">
+        <div class="zone exact"><div class="z-lbl">Ve stroji</div>
+          <div class="z-val">${fmtG(total)}<span class="u">g</span></div><div class="z-tag">přesné · vážené</div></div>
+        <div class="zone est ${mat?'':'na'}"><div class="z-lbl">Zásobník</div>
+          <div class="z-val">${mat?'~'+fmtG(tank)+'<span class="u">g</span>':'—'}</div><div class="z-tag">odhad</div></div>
+        <div class="zone est ${mat?'':'na'}"><div class="z-lbl">Přepady</div>
+          <div class="z-val">${mat?'~'+fmtG(ovf)+'<span class="u">g</span>':'—'}</div><div class="z-tag">odhad</div></div>
+      </div>
+      ${alert}${prog}
+      <div class="card-foot"><span>Flašky${mat?' '+esc(mat.name):''} <b>${mat?fmtG(bott)+' g':'—'}</b></span></div>
+      <div class="card-acts">
+        ${j?`<button class="est" onclick="opDrazky('${mc.id}')">Změnit drážky</button>
+             <button class="stop" onclick="opStop('${mc.id}')">Stop</button>`
+           :`<button class="est" onclick="opStart('${mc.id}')" ${mat?'':'disabled'}>Start tisku</button>`}
+        <span class="sep"></span>
+        <button class="pri" onclick="opNaplneni('${mc.id}')">Naplnit</button>
+        <button onclick="opPrepady('${mc.id}')" ${total<=EPS?'disabled':''}>Odebrat přepady</button>
+        <button onclick="opVyprazdneni('${mc.id}')" ${total<=EPS?'disabled':''}>Vyprázdnit</button>
+      </div></div>`;
+  }).join('');
+  return `<div class="viewhead"><h2>Přehled strojů</h2><span class="sub">Hmotnost ve stroji je přesná. Zásobník a přepady jsou odhady (~) z konfigurace tisku.</span></div><div class="cards">${cards}</div>`;
+}
+
+function vSklad(){
+  if(!state.materials.length) return `<div class="viewhead"><h2>Sklad</h2></div>`+
+    emptyBox('Zatím žádné materiály','Přidejte materiál a k němu sadu kontejnerů v Nastavení.','Přejít do Nastavení',"go('nastaveni')");
+  const b=balances();
+  const blocks=state.materials.map(mat=>{
+    const cs=state.containers.filter(c=>c.materialId===mat.id).sort((x,y)=>x.number-y.number);
+    const sklad=skladMass(b,mat.id), bott=botMass(b,mat.id);
+    const onM=state.machines.filter(m=>m.materialId===mat.id);
+    const mm=r1(onM.reduce((a,m)=>a+mMass(b,m.id),0));
+    const rows=cs.length?cs.map(c=>{ const mass=cMass(b,c.id), bt=batchById(c.batchId), z=mass<=EPS;
+      return `<div class="trow ${z?'zero':''}"><div class="cnum">č. ${c.number}</div>
+        <div class="cbatch">${!z&&bt?esc(bt.code)+(bt.kind!=='virgin'?` · ${bt.kind==='blend'?'směs':'recyklát'} ${bt.cycles}×`:''):'<span class="tnote">—</span>'}</div>
+        <div class="cmass">${fmtG(mass)}<span class="u"> g</span></div>
+        <div class="cdry">${dryTag(c,mass)}</div>
+        <div class="cstate">${z?'<span class="tnote">k naplnění</span>':'<span class="tnote">na skladě</span>'}</div></div>`;}).join('')
+      :`<div class="trow"><div class="tnote" style="grid-column:1/-1">Žádné kontejnery — přidejte je v Nastavení.</div></div>`;
+    return `<div class="matblock" style="--c:${mat.color}">
+      <div class="matblock-head"><span class="dot"></span><span class="nm">${esc(mat.name)}</span>
+        <span class="tnote">${mat.density?mat.density+' g/cm³':''}</span>
+        <div class="stats">
+          <div class="st"><div class="k">Sklad</div><div class="v">${fmtG(sklad)} g</div></div>
+          <div class="st"><div class="k">Flašky</div><div class="v">${fmtG(bott)} g</div></div>
+          <div class="st"><div class="k">Ve strojích</div><div class="v">${fmtG(mm)} g</div></div></div></div>
+      <div class="thead"><div>Kontejner</div><div>Šarže</div><div style="text-align:right">Hmotnost</div><div>Vysušeno</div><div>Stav</div></div>
+      ${rows}
+      <div class="matblock-foot"><span>Naplněných <b>${cs.filter(c=>cMass(b,c.id)>EPS).length}/${cs.length}</b></span>
+        <span>Celkem v oběhu <b>${fmtG(sklad+bott+mm)} g</b></span>
+        ${onM.length?`<span>Nasazeno v: <b>${onM.map(m=>esc(m.name)).join(', ')}</b></span>`:''}</div></div>`;
+  }).join('');
+  return `<div class="viewhead"><h2>Sklad</h2><span class="sub">Všechny kontejnery podle materiálu.</span></div>${blocks}`;
+}
+
+function vOperace(){
+  const mk=(fn,i,t,d,cls='')=>`<button class="op ${cls}" onclick="${fn}"><span class="ico">${ico(i)}</span><span><span class="t">${t}</span><span class="d">${d}</span></span></button>`;
+  return `<div class="viewhead"><h2>Operace</h2><span class="sub">Vážené operace mění evidenci, tiskové jen odhady. Omyl vrátíte tlačítkem Zpět.</span></div>
+  <div class="ops">
+    <div class="op-group">Sklad</div>
+    ${mk('opPrijem()','prijem','Příjem materiálu','Nová šarže od dodavatele do kontejneru')}
+    ${mk('opSuseni()','suseni','Vysušení','Zaznamenat datum vysušení kontejneru')}
+    <div class="op-group">Stroj</div>
+    ${mk('opNaplneni()','naplneni','Naplnění stroje','Celý obsah kontejneru do stroje')}
+    ${mk('opPrepady()','prepady','Odebrání přepadů','Ze stroje do flašek · resetuje odhad přepadů')}
+    ${mk('opVyprazdneni()','vyprazdneni','Vyprázdnění stroje','Vyvézt materiál do flašek nebo kontejneru (i po částech)')}
+    <div class="op-group">Tisk — odhady (nemění evidenci)</div>
+    ${mk('opStart()','start','Start tiskové úlohy','Čas, vrstvy, výška vrstvy a drážky','est-op')}
+    ${mk('opDrazky()','drazky','Změna počtu drážek','Zafixuje dosavadní spotřebu a přepočítá odhad','est-op')}
+    ${mk('opStop()','stop','Stop tiskové úlohy','Ukončit zadáním vrstvy','est-op')}
+    <div class="op-group">Recyklace</div>
+    ${mk('opPreseti()','preseti','Přesetí','Z flašek do stroje nebo kontejneru (váží se výstup)')}
+    ${mk('opFlaskyPrazdne()','flasky','Flašky prázdné','Vynulovat flašky — zbytek je odpad z přesévání','warn-op')}
+    <div class="op-group">Uzávěrky stroje</div>
+    ${mk('opZmena()','zmena','Změna materiálu','Odepsat zbytek a nasadit jiný materiál','warn-op')}
+    ${mk('opKorekce()','korekce','Ruční korekce stroje','Srovnat evidenci na zvážený stav (servis)','danger-op')}
+  </div>`;
+}
+
+function vHistorie(){
+  const items=[...state.movements.map(m=>({k:'mv',ts:m.ts,d:m})),
+               ...state.events.map(e=>({k:'ev',ts:e.ts,d:e})),
+               ...state.voids.map(v=>({k:'vd',ts:v.ts,d:v}))].sort((a,b)=>b.ts-a.ts);
+  const isJob=e=>['job_start','job_change','job_stop'].includes(e.type);
+  const f=items.filter(it=>{
+    if(histFilter==='all')return true;
+    if(histFilter==='print')return it.k==='ev'&&isJob(it.d);
+    if(histFilter==='loss')return it.k==='mv'&&(it.d.to===L.WASTE);
+    if(histFilter==='machine')return it.k==='mv'&&['naplneni','odebrani_prepadu','vyprazdneni','zmena_materialu','korekce'].includes(it.d.type);
+    if(histFilter==='sklad')return (it.k==='mv'&&['prijem','preseti'].includes(it.d.type))||(it.k==='ev'&&it.d.type==='drying');
+    return true; });
+  const fb=(k,l)=>`<button data-f="${k}" aria-pressed="${histFilter===k}">${l}</button>`;
+  const bar=`<div class="filters">${fb('all','Vše')}${fb('sklad','Sklad & recyklace')}${fb('machine','Stroje')}${fb('print','Tisk')}${fb('loss','Odpad & ztráty')}</div>`;
+  if(!f.length) return `<div class="viewhead"><h2>Historie</h2></div>${bar}`+
+    emptyBox('Zatím žádné záznamy','Po první operaci se tu objeví úplný auditní záznam.','Přejít na Operace',"go('operace')");
+  const rows=f.slice(0,400).map(it=>{
+    const o=opById(it.d.operatorId), who=o?o.name:'—';
+    if(it.k==='vd') return row(it.ts,`<span class="tchip void">Anulováno</span>`,esc(it.d.label),who,'','','voided');
+    if(it.k==='ev'&&it.d.type==='drying'){ const c=contById(it.d.containerId), mat=c&&matById(c.materialId);
+      return row(it.ts,`<span class="tchip event">Vysušení</span>${mat?matMini(mat):''}`,
+        `Kontejner <b>č. ${c?c.number:'?'}</b> · ${fmtDate(new Date(it.d.date+'T00:00:00').getTime())}`,who); }
+    if(it.k==='ev'&&isJob(it.d)){
+      const mc=machById(it.d.machineId), nm=mc?esc(mc.name):'stroj';
+      if(it.d.type==='job_start') return row(it.ts,`<span class="tchip job">Start tisku</span>`,
+        `<b>${nm}</b> · ${fmtInt(it.d.totalLayers)} vrstev · ${it.d.layerHeight} µm · ${it.d.grooves} drážek`,who);
+      if(it.d.type==='job_change') return row(it.ts,`<span class="tchip job">Změna drážek</span>`,
+        `<b>${nm}</b> · od vrstvy ${fmtInt(it.d.layer)}: ${it.d.from} → ${it.d.to} drážek`,who,
+        `~${fmtG(it.d.consumed)}`,'est');
+      return row(it.ts,`<span class="tchip job">Konec tisku${it.d.auto?' (odpočet)':''}</span>`,
+        `<b>${nm}</b> · vrstva ${fmtInt(it.d.layer)} · spotřeba odhadem`,who,`~${fmtG(it.d.consumed)}`,'est');
+    }
+    const m=it.d, t=TYPE[m.type]||{l:m.type,c:'move'}, mat=matById(m.materialId);
+    const loss=m.to===L.WASTE, gain=m.from===L.CORR;
+    return row(m.ts,`<span class="tchip ${t.c}">${t.l}</span>${mat?matMini(mat):''}`,
+      `<b>${esc(locName(m.from))}</b> → <b>${esc(locName(m.to))}</b>`,
+      (m.note?m.note+' · ':'')+who,(loss?'−':(gain?'+':''))+fmtG(m.amount),loss?'neg':(gain?'pos':''));
+  }).join('');
+  function row(ts,chips,flow,who,amt,amtCls,rowCls){
+    return `<div class="log-row ${rowCls||''}"><div class="log-when">${fmtDate(ts)}<br>${fmtTime(ts)}</div>
+      <div class="log-mid"><div class="log-line1">${chips}</div><div class="log-flow">${flow}</div>
+      <div class="log-note">${esc(who)}</div></div>
+      <div class="log-amt ${amtCls||''}">${amt?amt+'<span class="u"> g</span>':'<span style="color:var(--ink-faint)">—</span>'}</div></div>`;
+  }
+  return `<div class="viewhead"><h2>Historie</h2><span class="sub">${f.length} záznamů</span></div>${bar}<div class="log">${rows}</div>`;
+}
+
+function vNastaveni(){
+  const b=balances();
+  const mats=state.materials.map(m=>`<div class="list-row"><span class="swatch" style="background:${m.color}"></span>
+    <div class="grow"><div class="r-title">${esc(m.name)}</div><div class="r-sub">${m.density?m.density+' g/cm³':'hustota neuvedena'}</div></div>
+    <button class="mini-btn" onclick="edMaterial('${m.id}')">Upravit</button>
+    <button class="mini-btn danger" onclick="delMaterial('${m.id}')">Smazat</button></div>`).join('')||`<div class="tnote">Zatím žádné materiály.</div>`;
+  const machs=state.machines.map(m=>{ const mat=m.materialId?matById(m.materialId):null; const j=runningJob(m.id);
+    return `<div class="list-row"><span class="swatch" style="background:${mat?mat.color:'var(--line-strong)'}"></span>
+    <div class="grow"><div class="r-title">${esc(m.name)}${j?' · tiskne':''}</div>
+      <div class="r-sub">${mat?esc(mat.name)+' · '+fmtG(mMass(b,m.id))+' g':'bez materiálu'}</div></div>
+    <button class="mini-btn" onclick="edMachine('${m.id}')">Přejmenovat</button>
+    <button class="mini-btn danger" onclick="delMachine('${m.id}')">Smazat</button></div>`;}).join('')||`<div class="tnote">Zatím žádné stroje.</div>`;
+  const conts=state.materials.map(m=>{ const cs=state.containers.filter(c=>c.materialId===m.id).sort((x,y)=>x.number-y.number);
+    return `<div class="list-row"><span class="swatch" style="background:${m.color}"></span>
+    <div class="grow"><div class="r-title">${esc(m.name)}</div><div class="r-sub">${cs.length?cs.length+' ks · č. '+cs.map(c=>c.number).join(', '):'žádné kontejnery'}</div></div>
+    <button class="mini-btn" onclick="addContainers('${m.id}')">Přidat</button></div>`;}).join('')||`<div class="tnote">Nejdřív přidejte materiál.</div>`;
+  const ops=state.operators.map(o=>`<div class="list-row"><div class="grow"><div class="r-title">${esc(o.name)}</div></div>
+    <button class="mini-btn danger" onclick="delOperator('${o.id}')">Smazat</button></div>`).join('')||`<div class="tnote">Zatím žádná obsluha.</div>`;
+  /* konfigurace seskupené po stroj + materiál */
+  let cfgHTML='';
+  for(const mc of state.machines) for(const mat of state.materials){
+    const cs=configsFor(mc.id,mat.id).sort((a,b)=>a.layerHeight-b.layerHeight||a.grooves-b.grooves);
+    if(!cs.length)continue;
+    cfgHTML+=`<div class="cfg-group"><div class="gh"><span class="sw" style="background:${mat.color}"></span>${esc(mc.name)} · ${esc(mat.name)}</div>
+      ${cs.map(c=>`<div class="cfg-row">
+        <div><span class="lbl">výška</span><span class="k">${c.layerHeight} µm</span></div>
+        <div><span class="lbl">drážky</span><span class="k">${c.grooves}</span></div>
+        <div><span class="lbl">na drážku</span><span class="v">${fmtG(c.massPerGroove)} g</span></div>
+        <div><span class="lbl">plnění přepadu</span><span class="v">${fmtG(c.fillRate)} g/h</span></div>
+        <div><button class="mini-btn" onclick="edConfig('${c.id}')">Upravit</button>
+             <button class="mini-btn danger" onclick="delConfig('${c.id}')">×</button></div></div>`).join('')}</div>`;
+  }
+  if(!cfgHTML) cfgHTML=`<div class="tnote">Zatím žádné konfigurace. Bez nich nelze spustit tiskovou úlohu.</div>`;
+  const P_=(i,t,body)=>`<div class="panel"><h3><span class="ph-ico">${ico(i,16)}</span>${t}</h3><div class="panel-body">${body}</div></div>`;
+  return `<div class="viewhead"><h2>Nastavení</h2></div>
+  ${P_('stroj','Stroje',machs+`<div style="margin-top:14px"><button class="btn secondary" onclick="edMachine()">+ Přidat stroj</button></div>`)}
+  ${P_('cfg','Konfigurace tisku',`<p class="tnote" style="margin:0 0 12px">Jedinečná kombinace stroj + materiál + výška vrstvy + počet drážek. Určuje hmotnost na jednu drážku a rychlost plnění přepadů. Výchozí řádky jsou jen ukázkové — přepište je svými hodnotami.</p>`
+    +cfgHTML+`<div style="margin-top:14px"><button class="btn secondary" onclick="edConfig()">+ Přidat konfiguraci</button></div>`)}
+  ${P_('prijem','Materiály',mats+`<div style="margin-top:14px"><button class="btn secondary" onclick="edMaterial()">+ Přidat materiál</button></div>`)}
+  ${P_('naplneni','Kontejnery',`<p class="tnote" style="margin:0 0 12px">Sady kontejnerů jsou dedikované materiálu — AlSi10Mg č. 1 je jiná nádoba než 316L č. 1.</p>`+conts)}
+  ${P_('obsluha','Obsluha',ops+`<div style="margin-top:14px"><button class="btn secondary" onclick="addOperator()">+ Přidat obsluhu</button></div>`)}
+  ${P_('suseni','Hlídání sušení',`<label class="fld" style="margin:0"><span class="fldlabel">Upozornit „k přesušení" po počtu dní (0 = vypnuto)</span>
+    <input class="inp" type="number" min="0" step="1" value="${state.settings.dryingWarnDays}" onchange="setDryDays(this.value)"></label>`)}
+  ${P_('data','Data a zálohy',`<p class="tnote" style="margin:0 0 14px">Data žijí jen v tomto zařízení. Zálohu exportujte na konci směny.</p>
+    <div class="settings-actions"><button class="btn" onclick="exportData()">Exportovat zálohu</button>
+    <button class="btn secondary" onclick="q('#importFile').click()">Importovat zálohu</button>
+    <button class="btn danger" onclick="resetAll()">Vymazat vše</button></div>
+    <input type="file" id="importFile" accept="application/json,.json" class="hide" onchange="importData(this.files[0])">`)}`;
+}
+
+/* ===================== modal engine ===================== */
+function openModal(icon,title,body,onSubmit,label,cls){
+  q('#modalIco').innerHTML=ico(icon); q('#modalTitle').textContent=title; q('#modalBody').innerHTML=body;
+  q('#modalErr').textContent=''; const sb=q('#modalSubmit');
+  sb.textContent=label||'Uložit'; sb.className='btn'+(cls?' '+cls:'');
+  modalSubmit=onSubmit; q('#backdrop').classList.add('show');
+  setTimeout(()=>{const f=q('#modalBody').querySelector('input:not([type=hidden]),select'); if(f&&f.type!=='file')f.focus();},40);
+}
+const closeModal=()=>{q('#backdrop').classList.remove('show'); modalSubmit=null;};
+const mErr=m=>{q('#modalErr').textContent=m;};
+const modalOpen=()=>q('#backdrop').classList.contains('show');
+q('#modalSubmit').onclick=()=>{ if(modalSubmit&&modalSubmit()!==false) closeModal(); };
+q('#modalCancel').onclick=closeModal; q('#modalX').onclick=closeModal;
+q('#backdrop').addEventListener('click',e=>{if(e.target===q('#backdrop'))closeModal();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen())closeModal();});
+q('#opSel').onchange=function(){state.currentOperatorId=this.value||null; save();};
+q('#undoBtn').onclick=()=>{ const u=state.undo[state.undo.length-1]; if(!u)return;
+  if(confirm(`Anulovat poslední operaci?\n\n${u.label}`)) undoLast(); };
+
+const fld=(l,inner,hint)=>`<label class="fld"><span class="fldlabel">${l}</span>${inner}${hint?`<span class="fldhint">${hint}</span>`:''}</label>`;
+const gInput=(id,ph='0')=>`<div class="inp-wrap"><input class="inp big" id="${id}" type="text" inputmode="decimal" placeholder="${ph}"><span class="suffix">g</span></div>`;
+const numInput=(id,val,ph)=>`<input class="inp" id="${id}" type="text" inputmode="numeric" value="${val!=null?val:''}" placeholder="${ph||''}">`;
+const opField=()=>fld('Obsluha',`<select class="inp" id="fOp"><option value="">— vyberte —</option>${
+  state.operators.map(o=>`<option value="${o.id}" ${o.id===state.currentOperatorId?'selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
+function readOp(){ const v=q('#fOp').value; if(!v){mErr('Vyberte obsluhu.');return null;} state.currentOperatorId=v; return v; }
+const matSelect=(id,filter,sel)=>`<select class="inp" id="${id}">${state.materials.filter(filter||(()=>true))
+  .map(m=>`<option value="${m.id}" ${m.id===sel?'selected':''}>${esc(m.name)}</option>`).join('')}</select>`;
+const machSelect=(id,filter,sel)=>{ const ms=state.machines.filter(filter||(()=>true));
+  if(!ms.length)return`<select class="inp" id="${id}" disabled><option>žádný stroj</option></select>`;
+  return `<select class="inp" id="${id}">${ms.map(m=>`<option value="${m.id}" ${m.id===sel?'selected':''}>${esc(m.name)}</option>`).join('')}</select>`;};
+function contSelect(id,materialId,mode){ const b=balances();
+  const cs=state.containers.filter(c=>c.materialId===materialId).sort((x,y)=>x.number-y.number)
+    .filter(c=>mode==='full'?cMass(b,c.id)>EPS:true);
+  if(!cs.length)return`<select class="inp" id="${id}" disabled><option>${mode==='full'?'žádný naplněný kontejner':'žádný kontejner'}</option></select>`;
+  return `<select class="inp" id="${id}">${cs.map(c=>`<option value="${c.id}">č. ${c.number} — ${fmtG(cMass(b,c.id))} g</option>`).join('')}</select>`;}
+const warnBox=id=>`<div class="modal-info warn hide" id="${id}"></div>`;
+function showContWarn(boxId,contId){ const box=q('#'+boxId); if(!box)return;
+  const c=contById(contId), mass=c?cMass(balances(),c.id):0;
+  if(c&&mass>EPS){ box.classList.remove('hide');
+    box.innerHTML=`Kontejner č. ${c.number} už obsahuje <b>${fmtG(mass)} g</b>. Standardně se plní jen prázdný — obsah se smíchá a vznikne nová šarže (směs).`; }
+  else box.classList.add('hide'); }
+const contIsFull=id=>{const c=contById(id); return c?cMass(balances(),c.id)>EPS:false;};
+function fillContainer(cid,materialId,kind,cycles,codeInput){
+  const c=contById(cid), had=cMass(balances(),cid)>EPS, old=had?batchById(c.batchId):null; let bt;
+  if(had&&old) bt=newBatch(materialId,'blend',{parents:[old.id],cycles:Math.max(old.cycles||0,cycles||0)});
+  else bt=newBatch(materialId,kind,{cycles,code:codeInput});
+  c.batchId=bt.id; c.dryingDate=null; return bt; }
+
+/* ===================== MODUL 2 — operace tisku ===================== */
+function opStart(machineId){
+  const cand=state.machines.filter(m=>m.materialId&&!runningJob(m.id));
+  if(!cand.length){ toast('Žádný volný stroj s nasazeným materiálem.',true); return; }
+  const mid=machineId&&cand.some(m=>m.id===machineId)?machineId:cand[0].id;
+  openModal('start','Start tiskové úlohy',
+    machSelect('fMach',m=>m.materialId&&!runningJob(m.id),mid)&&fld('Stroj',machSelect('fMach',m=>m.materialId&&!runningJob(m.id),mid))+
+    `<div id="mi"></div>`+
+    fld('Celkový čas tisku',`<div class="dhm">
+      <span class="u"><input id="fD" type="text" inputmode="numeric" value="0"><span>dd</span></span>
+      <span class="u"><input id="fH" type="text" inputmode="numeric" value="0"><span>hh</span></span>
+      <span class="u"><input id="fM" type="text" inputmode="numeric" value="0"><span>mm</span></span></div>`)+
+    fld('Celkový počet vrstev',numInput('fL',null,'např. 4800'))+
+    `<div id="cfgw"></div>`+
+    `<div class="computed est"><span class="k">Odhad spotřeby celé úlohy</span><span class="v" id="cv">—</span></div>`+
+    opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      const d=parseNum(q('#fD').value)||0, h=parseNum(q('#fH').value)||0, mi=parseNum(q('#fM').value)||0;
+      const totalMs=((d*24+h)*60+mi)*60000;
+      if(totalMs<=0){mErr('Zadejte celkový čas tisku.');return false;}
+      const layers=Math.round(parseNum(q('#fL').value));
+      if(!layers||layers<=0){mErr('Zadejte celkový počet vrstev.');return false;}
+      const hSel=q('#fHeight'), gSel=q('#fGr');
+      if(!hSel||hSel.disabled||!gSel||gSel.disabled){mErr('Pro tento stroj a materiál nejsou konfigurace — přidejte je v Nastavení.');return false;}
+      const cfg=findConfig(mc.id,mc.materialId,parseNum(hSel.value),parseNum(gSel.value));
+      if(!cfg){mErr('Konfigurace nenalezena.');return false;}
+      pushUndo(`Start tisku na ${mc.name}`);
+      const ts=now();
+      const job={id:uid(),machineId:mc.id,materialId:mc.materialId,startTs:ts,totalMs,totalLayers:layers,
+        layerHeight:cfg.layerHeight,status:'running',endTs:null,endLayer:null,operatorId:op,
+        segments:[{configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate,
+          startLayer:0,startTs:ts,endLayer:null,endTs:null}]};
+      state.jobs.push(job);
+      addEvent({type:'job_start',ts,machineId:mc.id,jobId:job.id,totalLayers:layers,layerHeight:cfg.layerHeight,
+        grooves:cfg.grooves,operatorId:op});
+      save(); toast(`Tisk spuštěn na ${mc.name}`);
+    },'Spustit tisk','est');
+  const refresh=()=>{
+    const mc=machById(q('#fMach').value), mat=mc?matById(mc.materialId):null, b=balances();
+    q('#mi').innerHTML=`<div class="modal-info"><span class="k">Materiál:</span> <b>${mat?esc(mat.name):'—'}</b> · <span class="k">ve stroji</span> <b>${fmtG(mMass(b,mc.id))} g</b></div>`;
+    const hs=heightsFor(mc.id,mc.materialId);
+    if(!hs.length){ q('#cfgw').innerHTML=`<div class="modal-info danger">Pro ${esc(mc.name)} a ${mat?esc(mat.name):'—'} nejsou definované žádné konfigurace. Přidejte je v Nastavení → Konfigurace tisku.</div>`; upd(); return; }
+    q('#cfgw').innerHTML=`<div class="fld-row">
+      ${fld('Výška vrstvy',`<select class="inp" id="fHeight">${hs.map(h=>`<option value="${h}">${h} µm</option>`).join('')}</select>`)}
+      <div id="grw" style="flex:1"></div></div>`;
+    q('#fHeight').onchange=refreshGr; refreshGr();
+  };
+  const refreshGr=()=>{ const mc=machById(q('#fMach').value), h=parseNum(q('#fHeight').value);
+    const gs=groovesFor(mc.id,mc.materialId,h);
+    q('#grw').innerHTML=fld('Počáteční počet drážek / vrstvu',
+      `<select class="inp" id="fGr">${gs.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>`);
+    q('#fGr').onchange=upd; upd(); };
+  const upd=()=>{ const cv=q('#cv'); const mc=machById(q('#fMach').value);
+    const hS=q('#fHeight'), gS=q('#fGr'), lay=Math.round(parseNum(q('#fL').value));
+    if(!hS||!gS||!lay||lay<=0){ cv.textContent='—'; return; }
+    const cfg=findConfig(mc.id,mc.materialId,parseNum(hS.value),parseNum(gS.value));
+    cv.textContent=cfg?'~'+fmtG(lay*cfg.grooves*cfg.massPerGroove)+' g':'—'; };
+  q('#fMach').onchange=refresh; q('#fL').addEventListener('input',upd); refresh();
+}
+
+function opDrazky(machineId){
+  const jobs=state.jobs.filter(j=>j.status==='running');
+  if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
+  const mid=machineId&&jobs.some(j=>j.machineId===machineId)?machineId:jobs[0].machineId;
+  openModal('drazky','Změna počtu drážek',
+    fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
+    fld('Vrstva, ve které změna proběhla',numInput('fLayer',null,'číslo vrstvy'))+
+    `<div id="grw"></div>`+
+    `<div class="computed est"><span class="k">Spotřeba zafixovaná do této vrstvy</span><span class="v" id="cv">—</span></div>`+
+    opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j){mErr('Stroj netiskne.');return false;}
+      const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value));
+      if(!layer&&layer!==0){mErr('Zadejte číslo vrstvy.');return false;}
+      if(layer<s.startLayer){mErr(`Vrstva musí být alespoň ${fmtInt(s.startLayer)} (začátek aktuálního úseku).`);return false;}
+      if(layer>j.totalLayers){mErr(`Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`);return false;}
+      const gS=q('#fGr'); if(!gS||gS.disabled){mErr('Není dostupná jiná konfigurace.');return false;}
+      const cfg=findConfig(mc.id,j.materialId,j.layerHeight,parseNum(gS.value));
+      if(!cfg){mErr('Konfigurace nenalezena.');return false;}
+      if(cfg.grooves===s.grooves){mErr('Zvolte jiný počet drážek.');return false;}
+      pushUndo(`Změna drážek na ${mc.name} (${s.grooves} → ${cfg.grooves})`);
+      const ts=now(), before=s.grooves;
+      s.endLayer=layer; s.endTs=ts;
+      j.segments.push({configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate,
+        startLayer:layer,startTs:ts,endLayer:null,endTs:null});
+      addEvent({type:'job_change',ts,machineId:mc.id,jobId:j.id,layer,from:before,to:cfg.grooves,
+        consumed:jobConsumedTotal(j),operatorId:op});
+      save(); toast(`Drážky ${before} → ${cfg.grooves} od vrstvy ${fmtInt(layer)}`);
+    },'Uložit změnu','est');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
+    const s=lastSeg(j), cl=Math.round(currentLayer(j));
+    q('#mi').innerHTML=`<div class="modal-info est">Aktuálně <b>${s.grooves}</b> drážek · odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · výška ${j.layerHeight} µm</div>`;
+    const li=q('#fLayer'); if(!li.value) li.value=cl;
+    const gs=groovesFor(mc.id,j.materialId,j.layerHeight).filter(g=>g!==s.grooves);
+    q('#grw').innerHTML=gs.length
+      ? fld('Nový počet drážek / vrstvu',`<select class="inp" id="fGr">${gs.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>`)
+      : `<div class="modal-info danger">Pro tuto výšku vrstvy není jiná konfigurace. Přidejte ji v Nastavení.</div>`;
+    upd(); };
+  const upd=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
+    const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value));
+    let done=0; for(const sg of j.segments) if(sg!==s) done+=segConsumed(j,sg,sg.startTs,segEndTs(j,sg));
+    const cv=q('#cv');
+    if(isNaN(layer)||layer<s.startLayer){cv.textContent='—';return;}
+    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*s.grooves*s.massPerGroove)+' g'; };
+  q('#fMach').onchange=refresh; q('#fLayer').addEventListener('input',upd); refresh();
+}
+
+function opStop(machineId){
+  const jobs=state.jobs.filter(j=>j.status==='running');
+  if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
+  const mid=machineId&&jobs.some(j=>j.machineId===machineId)?machineId:jobs[0].machineId;
+  openModal('stop','Stop tiskové úlohy',
+    fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
+    fld('Vrstva, ve které tisk skončil',numInput('fLayer',null,'číslo vrstvy'),'Předvyplněno odhadem z odpočtu — přepište skutečnou hodnotou.')+
+    `<div class="computed est"><span class="k">Celková spotřeba úlohy (odhad)</span><span class="v" id="cv">—</span></div>`+
+    opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j){mErr('Stroj netiskne.');return false;}
+      const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value));
+      if(isNaN(layer)){mErr('Zadejte číslo vrstvy.');return false;}
+      if(layer<s.startLayer){mErr(`Vrstva musí být alespoň ${fmtInt(s.startLayer)}.`);return false;}
+      if(layer>j.totalLayers){mErr(`Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`);return false;}
+      pushUndo(`Konec tisku na ${mc.name}`);
+      const ts=now(); s.endLayer=layer; s.endTs=ts;
+      j.status='done'; j.endTs=ts; j.endLayer=layer; j.finish='manual';
+      addEvent({type:'job_stop',ts,machineId:mc.id,jobId:j.id,layer,consumed:jobConsumedTotal(j),operatorId:op});
+      save(); toast(`Tisk ukončen ve vrstvě ${fmtInt(layer)}`);
+    },'Ukončit tisk','est');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
+    const cl=Math.round(currentLayer(j));
+    q('#mi').innerHTML=`<div class="modal-info est">Odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · uplynulo ${fmtDur(now()-j.startTs)} z ${fmtDur(j.totalMs)}</div>`;
+    const li=q('#fLayer'); li.value=cl; upd(); };
+  const upd=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
+    const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value)), cv=q('#cv');
+    if(isNaN(layer)||layer<s.startLayer){cv.textContent='—';return;}
+    let done=0; for(const sg of j.segments) if(sg!==s) done+=segConsumed(j,sg,sg.startTs,segEndTs(j,sg));
+    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*s.grooves*s.massPerGroove)+' g'; };
+  q('#fMach').onchange=refresh; q('#fLayer').addEventListener('input',upd); refresh();
+}
+
+/* ===================== MODUL 1 — operace ===================== */
+function opPrijem(){
+  if(!state.materials.length){toast('Nejdřív přidejte materiál.',true);return;}
+  const first=state.materials[0].id;
+  openModal('prijem','Příjem materiálu',
+    fld('Materiál',matSelect('fMat'))+`<div id="cw">${fld('Kontejner',contSelect('fCont',first))}</div>`+warnBox('wb')+
+    fld('Navážená hmotnost',gInput('fG'))+fld('Šarže (nepovinné)',`<input class="inp" id="fBatch" placeholder="automaticky">`)+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const cid=q('#fCont').value; if(!cid||q('#fCont').disabled){mErr('Vyberte kontejner.');return false;}
+      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      const c=contById(cid);
+      if(contIsFull(cid)&&!confirm(`Kontejner č. ${c.number} není prázdný.\nOpravdu do něj přidat další materiál?`))return false;
+      pushUndo(`Příjem ${fmtG(g)} g → kontejner č. ${c.number}`);
+      const bt=fillContainer(cid,c.materialId,'virgin',0,q('#fBatch').value);
+      addMovement({type:'prijem',from:L.SUPPLIER,to:CONT(cid),amount:g,materialId:c.materialId,containerId:cid,batchId:bt.id,operatorId:op});
+      save(); toast(`Příjem ${fmtG(g)} g → č. ${c.number}`); });
+  const bindCw=()=>{const s=q('#fCont'); if(s&&!s.disabled){s.onchange=()=>showContWarn('wb',s.value); showContWarn('wb',s.value);}};
+  q('#fMat').onchange=function(){ q('#cw').innerHTML=fld('Kontejner',contSelect('fCont',this.value)); bindCw(); };
+  bindCw();
+}
+function opSuseni(){
+  if(!state.containers.length){toast('Nejdřív přidejte kontejnery.',true);return;}
+  const first=state.materials[0].id;
+  openModal('suseni','Vysušení',
+    fld('Materiál',matSelect('fMat'))+`<div id="cw">${fld('Kontejner',contSelect('fCont',first,'full'))}</div>`+
+    fld('Datum vysušení',`<input class="inp" id="fDate" type="date" value="${todayISO()}">`)+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const cid=q('#fCont').value; if(!cid||q('#fCont').disabled){mErr('Vyberte naplněný kontejner.');return false;}
+      const d=q('#fDate').value; if(!d){mErr('Zadejte datum.');return false;}
+      const c=contById(cid); pushUndo(`Vysušení kontejneru č. ${c.number}`);
+      c.dryingDate=d; addEvent({type:'drying',containerId:cid,date:d,operatorId:op});
+      save(); toast(`Vysušení zaznamenáno · č. ${c.number}`); });
+  q('#fMat').onchange=function(){ q('#cw').innerHTML=fld('Kontejner',contSelect('fCont',this.value,'full')); };
+}
+function opNaplneni(machineId){
+  if(!state.machines.length){toast('Nejdřív přidejte stroj.',true);return;}
+  const mid=machineId||state.machines[0].id;
+  openModal('naplneni','Naplnění stroje',
+    fld('Stroj',machSelect('fMach',null,mid))+`<div id="mi"></div><div id="cw"></div>`+
+    `<div class="computed big"><span class="k">Přesune se celý obsah kontejneru</span><span class="v" id="cv">—</span></div>`+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      const cs=q('#fCont'); if(!cs||cs.disabled||!cs.value){mErr('Vyberte naplněný kontejner.');return false;}
+      const c=contById(cs.value), g=cMass(balances(),c.id);
+      if(g<=EPS){mErr('Vybraný kontejner je prázdný.');return false;}
+      if(mc.materialId&&mc.materialId!==c.materialId){mErr('Ve stroji je jiný materiál. Použijte Změnu materiálu.');return false;}
+      pushUndo(`Naplnění ${mc.name} z kontejneru č. ${c.number} (${fmtG(g)} g)`);
+      if(!mc.materialId) mc.materialId=c.materialId;
+      addMovement({type:'naplneni',from:CONT(c.id),to:MACH(mc.id),amount:g,materialId:c.materialId,
+        containerId:c.id,machineId:mc.id,batchId:c.batchId,operatorId:op});
+      c.batchId=null; c.dryingDate=null;
+      save(); toast(`${fmtG(g)} g → ${mc.name}`); },'Naplnit stroj');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), b=balances();
+    q('#mi').innerHTML = mc&&mc.materialId
+      ? `<div class="modal-info"><span class="k">Ve stroji:</span> <b>${esc(matById(mc.materialId).name)} · ${fmtG(mMass(b,mc.id))} g</b> <span class="k">— doplnit lze jen stejný materiál</span></div>`
+      : `<div class="modal-info"><span class="k">Stroj je prázdný — nasazený materiál určí první naplnění.</span></div>`;
+    const filter = mc&&mc.materialId?(m=>m.id===mc.materialId):(()=>true);
+    const mats=state.materials.filter(filter), cur=mats[0]?mats[0].id:null;
+    q('#cw').innerHTML=(mc&&mc.materialId?'':fld('Materiál',matSelect('fMat',filter)))
+      +`<div id="cs">${fld('Kontejner (přesune se celý obsah)',contSelect('fCont',cur,'full'))}</div>`;
+    const ms=q('#fMat'); if(ms) ms.onchange=()=>{ q('#cs').innerHTML=fld('Kontejner (přesune se celý obsah)',contSelect('fCont',ms.value,'full')); bindC(); };
+    bindC(); };
+  const bindC=()=>{ const cs=q('#fCont'), cv=q('#cv');
+    const upd=()=>{ cv.textContent=(cs&&!cs.disabled&&cs.value)?fmtG(cMass(balances(),cs.value))+' g':'—'; };
+    if(cs&&!cs.disabled) cs.onchange=upd; upd(); };
+  q('#fMach').onchange=refresh; refresh();
+}
+function opPrepady(machineId){
+  const b=balances(), avail=state.machines.filter(m=>m.materialId&&mMass(b,m.id)>EPS);
+  if(!avail.length){toast('Žádný stroj nemá nasazený materiál.',true);return;}
+  const mid=machineId&&avail.some(m=>m.id===machineId)?machineId:avail[0].id;
+  openModal('prepady','Odebrání přepadů',
+    fld('Stroj',machSelect('fMach',m=>m.materialId&&mMass(b,m.id)>EPS,mid))+`<div id="mi"></div>`+
+    fld('Zvážené množství z přepadů',gInput('fG'),'Přesune se do flašek. Odhad zaplnění přepadů se vynuluje.')+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      const have=mMass(balances(),mc.id);
+      if(g>have+EPS){mErr(`Ve stroji je jen ${fmtG(have)} g.`);return false;}
+      const est=ovfEst(mc.id);
+      pushUndo(`Odebrání přepadů ${fmtG(g)} g z ${mc.name}`);
+      addMovement({type:'odebrani_prepadu',from:MACH(mc.id),to:BOTT(mc.materialId),amount:g,
+        materialId:mc.materialId,machineId:mc.id,operatorId:op});
+      save();
+      const dev=est>EPS?` · odhad byl ${fmtG(est)} g (${g>est?'+':''}${Math.round((g-est)/est*100)} %)`:'';
+      toast(`Přepad ${fmtG(g)} g → flašky${dev}`); });
+  const refresh=()=>{ const mc=machById(q('#fMach').value), bb=balances();
+    q('#mi').innerHTML=`<div class="modal-info"><span class="k">Ve stroji:</span> <b>${esc(matById(mc.materialId).name)} · ${fmtG(mMass(bb,mc.id))} g</b><br>
+      <span class="k">Odhad v přepadech:</span> <b>~${fmtG(ovfEst(mc.id))} g</b></div>`; };
+  q('#fMach').onchange=refresh; refresh();
+}
+function opVyprazdneni(machineId){
+  const b=balances(), avail=state.machines.filter(m=>m.materialId&&mMass(b,m.id)>EPS);
+  if(!avail.length){toast('Žádný stroj nemá materiál k vyvezení.',true);return;}
+  const mid=machineId&&avail.some(m=>m.id===machineId)?machineId:avail[0].id;
+  openModal('vyprazdneni','Vyprázdnění stroje',
+    `<div class="modal-info"><span class="k">Přesune vyvezený materiál ze stroje. Může proběhnout na víc kroků — stav stroje se nenuluje.</span></div>`+
+    fld('Stroj',machSelect('fMach',m=>m.materialId&&mMass(b,m.id)>EPS,mid))+`<div id="mi"></div>`+
+    fld('Zvážené vyvezené množství',gInput('fG'))+
+    fld('Kam',`<div class="radios"><label><input type="radio" name="dst" value="bott" checked>Do flašek</label>
+      <label><input type="radio" name="dst" value="cont">Do kontejneru</label></div>`)+
+    `<div id="dx"></div>`+warnBox('wb')+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      const have=mMass(balances(),mc.id);
+      if(g>have+EPS){mErr(`Stroj eviduje jen ${fmtG(have)} g. Přebytek řešte Ruční korekcí.`);return false;}
+      const dst=q('input[name=dst]:checked').value;
+      if(dst==='bott'){ pushUndo(`Vyprázdnění ${fmtG(g)} g z ${mc.name} → flašky`);
+        addMovement({type:'vyprazdneni',from:MACH(mc.id),to:BOTT(mc.materialId),amount:g,materialId:mc.materialId,machineId:mc.id,operatorId:op});
+      } else { const cs=q('#fCont'); if(!cs||cs.disabled||!cs.value){mErr('Vyberte kontejner.');return false;}
+        const c=contById(cs.value);
+        if(contIsFull(c.id)&&!confirm(`Kontejner č. ${c.number} není prázdný.\nOpravdu do něj vyvézt další materiál?`))return false;
+        pushUndo(`Vyprázdnění ${fmtG(g)} g z ${mc.name} → kontejner č. ${c.number}`);
+        const bt=fillContainer(c.id,mc.materialId,'recyclate',1);
+        addMovement({type:'vyprazdneni',from:MACH(mc.id),to:CONT(c.id),amount:g,materialId:mc.materialId,
+          machineId:mc.id,containerId:c.id,batchId:bt.id,operatorId:op}); }
+      save(); toast(`Vyvezeno ${fmtG(g)} g`); },'Vyvézt');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), bb=balances();
+    q('#mi').innerHTML=`<div class="modal-info"><span class="k">Ve stroji:</span> <b>${esc(matById(mc.materialId).name)} · ${fmtG(mMass(bb,mc.id))} g</b></div>`;
+    const dst=(q('input[name=dst]:checked')||{}).value;
+    q('#dx').innerHTML=dst==='cont'?fld('Cílový kontejner',contSelect('fCont',mc.materialId)):'';
+    const cs=q('#fCont'); if(cs&&!cs.disabled){cs.onchange=()=>showContWarn('wb',cs.value); showContWarn('wb',cs.value);}
+    else q('#wb').classList.add('hide'); };
+  q('#fMach').onchange=refresh; qa('input[name=dst]').forEach(r=>r.onchange=refresh); refresh();
+}
+function opPreseti(){
+  const b=balances(), piles=state.materials.filter(m=>botMass(b,m.id)>EPS);
+  if(!piles.length){toast('V žádných flaškách není materiál k přesetí.',true);return;}
+  openModal('preseti','Přesetí',
+    fld('Materiál',matSelect('fMat',m=>botMass(b,m.id)>EPS))+`<div id="pi"></div>`+
+    fld('Kam přeseto',`<div class="radios"><label><input type="radio" name="dst" value="mach" checked>Do stroje</label>
+      <label><input type="radio" name="dst" value="cont">Do kontejneru</label></div>`)+
+    `<div id="dx"></div>`+warnBox('wb')+
+    fld('Zvážený výstup z přesévání',gInput('fG'),'Váží se jen dobrý prosetý materiál. Odpad zůstane ve flaškách.')+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mat=q('#fMat').value, dst=q('input[name=dst]:checked').value;
+      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      const have=botMass(balances(),mat);
+      if(g>have+EPS){mErr(`Ve flaškách je jen ${fmtG(have)} g.`);return false;}
+      if(dst==='mach'){ const mc=machById((q('#fMach')||{}).value); if(!mc){mErr('Vyberte stroj.');return false;}
+        if(mc.materialId&&mc.materialId!==mat){mErr('Ve stroji je jiný materiál.');return false;}
+        pushUndo(`Přesetí ${fmtG(g)} g → ${mc.name}`);
+        if(!mc.materialId) mc.materialId=mat;
+        addMovement({type:'preseti',from:BOTT(mat),to:MACH(mc.id),amount:g,materialId:mat,machineId:mc.id,operatorId:op,note:'recyklát'});
+      } else { const cs=q('#fCont'); if(!cs||cs.disabled||!cs.value){mErr('Vyberte kontejner.');return false;}
+        const c=contById(cs.value), cyc=parseInt(q('#fCyc').value,10);
+        if(contIsFull(c.id)&&!confirm(`Kontejner č. ${c.number} není prázdný.\nOpravdu do něj přesít další materiál?`))return false;
+        pushUndo(`Přesetí ${fmtG(g)} g → kontejner č. ${c.number}`);
+        const bt=fillContainer(c.id,mat,'recyclate',isNaN(cyc)?1:cyc);
+        addMovement({type:'preseti',from:BOTT(mat),to:CONT(c.id),amount:g,materialId:mat,containerId:c.id,batchId:bt.id,operatorId:op,note:'recyklát'}); }
+      save(); toast(`Přeseto ${fmtG(g)} g`); });
+  const refresh=()=>{ const mat=q('#fMat').value, bb=balances();
+    q('#pi').innerHTML=`<div class="modal-info"><span class="k">Ve flaškách:</span> <b>${fmtG(botMass(bb,mat))} g</b> <span class="k">(včetně nezměřeného odpadu)</span></div>`;
+    const dst=(q('input[name=dst]:checked')||{}).value;
+    q('#dx').innerHTML=dst==='cont'
+      ? fld('Cílový kontejner',contSelect('fCont',mat))+fld('Cyklus recyklátu',`<input class="inp" id="fCyc" type="number" min="1" step="1" value="1">`,'Flašky jsou směs z více tisků — cyklus je orientační.')
+      : fld('Cílový stroj',machSelect('fMach',m=>!m.materialId||m.materialId===mat));
+    const cs=q('#fCont'); if(cs&&!cs.disabled){cs.onchange=()=>showContWarn('wb',cs.value); showContWarn('wb',cs.value);}
+    else q('#wb').classList.add('hide'); };
+  q('#fMat').onchange=refresh; qa('input[name=dst]').forEach(r=>r.onchange=refresh); refresh();
+}
+function opFlaskyPrazdne(){
+  const b=balances(), piles=state.materials.filter(m=>botMass(b,m.id)>EPS);
+  if(!piles.length){toast('Žádné flašky nemají zůstatek.',true);return;}
+  openModal('flasky','Flašky prázdné',
+    fld('Materiál',matSelect('fMat',m=>botMass(b,m.id)>EPS))+`<div id="fi"></div>`+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mat=q('#fMat').value, rest=botMass(balances(),mat);
+      if(rest<=EPS){mErr('Ve flaškách není zůstatek.');return false;}
+      pushUndo(`Flašky ${matById(mat).name} vynulovány (odpad ${fmtG(rest)} g)`);
+      addMovement({type:'flasky_prazdne',from:BOTT(mat),to:L.WASTE,amount:rest,materialId:mat,operatorId:op,note:'odpad z přesévání'});
+      save(); toast(`Flašky vynulovány · odpad ${fmtG(rest)} g`); },'Vynulovat flašky','warn');
+  const refresh=()=>{ const mat=q('#fMat').value;
+    q('#fi').innerHTML=`<div class="modal-info warn">Zbytek ve flaškách <b>${fmtG(botMass(balances(),mat))} g</b> se zaúčtuje jako odpad z přesévání.</div>`; };
+  q('#fMat').onchange=refresh; refresh();
+}
+function opZmena(){
+  if(!state.machines.length){toast('Nejdřív přidejte stroj.',true);return;}
+  openModal('zmena','Změna materiálu',
+    `<div class="modal-info"><span class="k">Odepíše evidovaný zbytek jako ztrátu a nasadí nový materiál. Použitelný prášek vyvezte předtím operací Vyprázdnění stroje.</span></div>`+
+    fld('Stroj',machSelect('fMach'))+`<div id="mi"></div>`+
+    fld('Nový nasazený materiál',`<select class="inp" id="fNew"><option value="">— žádný (nechat prázdný) —</option>${
+      state.materials.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>`,
+      'Stejný materiál lze zvolit i po servisním vyprázdnění.')+
+    `<div class="computed"><span class="k">Zbytek odepsaný jako ztráta</span><span class="v" id="lv">—</span></div>`+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      if(runningJob(mc.id)){mErr('Na stroji běží tisková úloha — nejdřív ji ukončete.');return false;}
+      const rest=mMass(balances(),mc.id), newMat=q('#fNew').value||null;
+      const oldName=mc.materialId?matById(mc.materialId).name:'—', newName=newMat?matById(newMat).name:'prázdný';
+      if(!mc.materialId&&!newMat){mErr('Stroj je prázdný — vyberte nový materiál.');return false;}
+      if(rest>EPS&&!confirm(`Zbytek ${fmtG(rest)} g bude odepsán jako ztráta.\n\n${oldName} → ${newName}\n\nPokračovat?`))return false;
+      pushUndo(`Změna materiálu na ${mc.name}: ${oldName} → ${newName}`);
+      if(rest>EPS) addMovement({type:'zmena_materialu',from:MACH(mc.id),to:L.WASTE,amount:rest,
+        materialId:mc.materialId,machineId:mc.id,operatorId:op,note:'zbytek při změně materiálu'});
+      mc.materialId=newMat; save(); toast(`${mc.name}: ${oldName} → ${newName}`); },'Provést změnu','warn');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), bb=balances(), rest=mc?mMass(bb,mc.id):0;
+    q('#mi').innerHTML=`<div class="modal-info"><span class="k">Ve stroji:</span> <b>${mc&&mc.materialId?esc(matById(mc.materialId).name)+' · ':''}${fmtG(rest)} g</b></div>`;
+    const lv=q('#lv'); lv.textContent=fmtG(rest)+' g'; lv.className='v'+(rest>EPS?' neg':''); };
+  q('#fMach').onchange=refresh; refresh();
+}
+function opKorekce(){
+  if(!state.machines.length){toast('Nejdřív přidejte stroj.',true);return;}
+  openModal('korekce','Ruční korekce stroje',
+    `<div class="modal-info danger">Pro servis nebo když se evidence rozejde se skutečností. Odhady zásobníku a přepadů se srovnají na zadanou hodnotu.</div>`+
+    fld('Stroj',machSelect('fMach'))+`<div id="mi"></div>`+
+    fld('Skutečně zvážené množství ve stroji',gInput('fG'),'Např. 0 g po kompletním vyprázdnění při servisu.')+
+    `<label class="check"><input type="checkbox" id="fKeep" checked><span>Ponechat nasazený materiál</span></label>`+opField(),
+    ()=>{ const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      if(runningJob(mc.id)){mErr('Na stroji běží tisková úloha — nejdřív ji ukončete.');return false;}
+      const book=mMass(balances(),mc.id), meas=parseG(q('#fG').value);
+      if(isNaN(meas)||meas<0){mErr('Zadejte zvážené množství (0 nebo více).');return false;}
+      const diff=r1(meas-book);
+      if(Math.abs(diff)<=EPS&&(q('#fKeep').checked||!mc.materialId)){mErr('Evidence i skutečnost se shodují — není co opravit.');return false;}
+      pushUndo(`Korekce ${mc.name} na ${fmtG(meas)} g`);
+      if(diff<-EPS) addMovement({type:'korekce',from:MACH(mc.id),to:L.WASTE,amount:-diff,materialId:mc.materialId,machineId:mc.id,operatorId:op,note:'korekce (−)',meas});
+      else if(diff>EPS) addMovement({type:'korekce',from:L.CORR,to:MACH(mc.id),amount:diff,materialId:mc.materialId,machineId:mc.id,operatorId:op,note:'korekce (+)',meas});
+      if(!q('#fKeep').checked) mc.materialId=null;
+      save(); toast(`${mc.name}: stav srovnán na ${fmtG(meas)} g`); },'Srovnat stav','danger');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), bb=balances();
+    q('#mi').innerHTML=`<div class="modal-info"><span class="k">Eviduje se:</span> <b>${mc&&mc.materialId?esc(matById(mc.materialId).name)+' · ':''}${fmtG(mc?mMass(bb,mc.id):0)} g</b></div>`; };
+  q('#fMach').onchange=refresh; refresh();
+}
+
+/* ===================== Nastavení ===================== */
+function edConfig(id){
+  if(!state.machines.length||!state.materials.length){toast('Nejdřív přidejte stroj a materiál.',true);return;}
+  const c=id?cfgById(id):null;
+  openModal('cfg',id?'Upravit konfiguraci':'Nová konfigurace',
+    `<div class="fld-row">${fld('Stroj',machSelect('fMach',null,c?c.machineId:null))}${fld('Materiál',matSelect('fMat',null,c?c.materialId:null))}</div>`+
+    `<div class="fld-row">${fld('Výška vrstvy (µm)',numInput('fH',c?c.layerHeight:'','30'))}${fld('Drážky / vrstvu',numInput('fGr',c?c.grooves:'','40'))}</div>`+
+    `<div class="fld-row">${fld('Hmotnost na drážku (g)',numInput('fMg',c?String(c.massPerGroove).replace('.',','):'','1,2'))}
+      ${fld('Rychlost plnění přepadu (g/h)',numInput('fFr',c?String(c.fillRate).replace('.',','):'','180'))}</div>`,
+    ()=>{ const mid=q('#fMach').value, mat=q('#fMat').value;
+      const h=Math.round(parseNum(q('#fH').value)), gr=Math.round(parseNum(q('#fGr').value));
+      const mg=parseNum(q('#fMg').value), fr=parseNum(q('#fFr').value);
+      if(!h||h<=0){mErr('Zadejte výšku vrstvy.');return false;}
+      if(!gr||gr<=0){mErr('Zadejte počet drážek.');return false;}
+      if(isNaN(mg)||mg<=0){mErr('Zadejte hmotnost na drážku.');return false;}
+      if(isNaN(fr)||fr<0){mErr('Zadejte rychlost plnění přepadu.');return false;}
+      const dup=state.configs.find(x=>x!==c&&x.machineId===mid&&x.materialId===mat&&x.layerHeight===h&&x.grooves===gr);
+      if(dup){mErr('Tato kombinace už existuje.');return false;}
+      if(c) Object.assign(c,{machineId:mid,materialId:mat,layerHeight:h,grooves:gr,massPerGroove:mg,fillRate:fr});
+      else state.configs.push({id:uid(),machineId:mid,materialId:mat,layerHeight:h,grooves:gr,massPerGroove:mg,fillRate:fr});
+      save(); toast('Konfigurace uložena'); });
+}
+function delConfig(id){ if(state.jobs.some(j=>j.status==='running'&&j.segments.some(s=>s.configId===id))){
+    toast('Konfiguraci právě používá běžící tisk.',true); return; }
+  if(!confirm('Smazat tuto konfiguraci?'))return;
+  state.configs=state.configs.filter(c=>c.id!==id); save(); }
+function edMachine(id){ const m=id?machById(id):null;
+  openModal('stroj',id?'Přejmenovat stroj':'Nový stroj',
+    fld('Název stroje',`<input class="inp" id="fName" value="${m?esc(m.name):''}" placeholder="např. SLM 280">`),
+    ()=>{ const n=q('#fName').value.trim(); if(!n){mErr('Zadejte název.');return false;}
+      if(m)m.name=n; else state.machines.push({id:uid(),name:n,materialId:null});
+      save(); toast('Stroj uložen'); }); }
+function delMachine(id){ const b=balances();
+  if(runningJob(id)){toast('Na stroji běží tisk.',true);return;}
+  if(mMass(b,id)>EPS){toast('Stroj obsahuje materiál — nejdřív ho vyprázdněte.',true);return;}
+  if(state.movements.some(mv=>mv.machineId===id)){toast('Stroj má historii pohybů, nelze smazat.',true);return;}
+  if(!confirm('Smazat tento stroj? Smažou se i jeho konfigurace.'))return;
+  state.machines=state.machines.filter(m=>m.id!==id);
+  state.configs=state.configs.filter(c=>c.machineId!==id); save(); }
+function edMaterial(id){ const m=id?matById(id):null, used=state.materials.map(x=>x.color);
+  const col=m?m.color:(MAT_COLORS.find(c=>!used.includes(c))||MAT_COLORS[state.materials.length%MAT_COLORS.length]);
+  openModal('prijem',id?'Upravit materiál':'Nový materiál',
+    fld('Název / typ prášku',`<input class="inp" id="fName" value="${m?esc(m.name):''}" placeholder="např. Ti-6Al-4V">`)+
+    fld('Barva',`<div style="display:flex;gap:8px;flex-wrap:wrap">${MAT_COLORS.map(c=>
+      `<label style="cursor:pointer;position:relative"><input type="radio" name="col" value="${c}" ${c===col?'checked':''} style="position:absolute;opacity:0">
+       <span style="display:block;width:34px;height:34px;border-radius:9px;background:${c};box-shadow:0 0 0 2px ${c===col?'var(--ink)':'transparent'}"></span></label>`).join('')}</div>`)+
+    fld('Hustota (g/cm³, nepovinné)',`<input class="inp" id="fDens" type="text" inputmode="decimal" value="${m&&m.density?m.density:''}" placeholder="2,67">`),
+    ()=>{ const n=q('#fName').value.trim(); if(!n){mErr('Zadejte název.');return false;}
+      const c=(q('input[name=col]:checked')||{}).value||MAT_COLORS[0], d=parseNum(q('#fDens').value);
+      if(m){m.name=n;m.color=c;m.density=isNaN(d)?null:d;}
+      else state.materials.push({id:uid(),name:n,color:c,density:isNaN(d)?null:d});
+      save(); toast('Materiál uložen'); }); }
+function delMaterial(id){
+  if(state.containers.some(c=>c.materialId===id)){toast('Nejdřív smažte kontejnery tohoto materiálu.',true);return;}
+  if(state.movements.some(m=>m.materialId===id)){toast('Materiál má historii pohybů, nelze smazat.',true);return;}
+  if(!confirm('Smazat tento materiál? Smažou se i jeho konfigurace.'))return;
+  state.materials=state.materials.filter(m=>m.id!==id);
+  state.configs=state.configs.filter(c=>c.materialId!==id);
+  state.machines.forEach(m=>{if(m.materialId===id)m.materialId=null;}); save(); }
+function addContainers(materialId){ const m=matById(materialId);
+  const ex=state.containers.filter(c=>c.materialId===materialId).map(c=>c.number), mx=ex.length?Math.max(...ex):0;
+  openModal('naplneni','Přidat kontejnery',
+    `<div class="modal-info"><span class="k">${esc(m.name)} — stávající:</span> <b>${ex.length?ex.sort((a,b)=>a-b).join(', '):'žádné'}</b></div>`+
+    `<div class="fld-row">${fld('Od čísla',numInput('fFrom',mx+1))}${fld('Do čísla',numInput('fTo',mx+(ex.length?1:5)))}</div>`,
+    ()=>{ const f=Math.round(parseNum(q('#fFrom').value)), t=Math.round(parseNum(q('#fTo').value));
+      if(isNaN(f)||isNaN(t)||t<f){mErr('Zadejte platný rozsah.');return false;}
+      if(t-f>300){mErr('Rozsah je příliš velký.');return false;}
+      let n=0; for(let i=f;i<=t;i++){ if(ex.includes(i))continue; state.containers.push({id:uid(),number:i,materialId,batchId:null,dryingDate:null}); n++; }
+      save(); toast(`Přidáno ${n} kontejnerů`); },'Přidat'); }
+function addOperator(){ openModal('obsluha','Přidat obsluhu',fld('Jméno obsluhy',`<input class="inp" id="fName" placeholder="Jméno">`),
+  ()=>{ const n=q('#fName').value.trim(); if(!n){mErr('Zadejte jméno.');return false;}
+    const o={id:uid(),name:n}; state.operators.push(o); if(!state.currentOperatorId)state.currentOperatorId=o.id;
+    save(); toast('Obsluha přidána'); }); }
+function delOperator(id){ if(!confirm('Smazat tuto obsluhu? Historie zůstane zachována.'))return;
+  state.operators=state.operators.filter(o=>o.id!==id);
+  if(state.currentOperatorId===id) state.currentOperatorId=state.operators[0]?state.operators[0].id:null; save(); }
+function setDryDays(v){ const n=parseInt(v,10); state.settings.dryingWarnDays=isNaN(n)?0:Math.max(0,n); save(); }
+
+/* ===================== data ===================== */
+function exportData(){
+  const blob=new Blob([JSON.stringify({...state,exportedAt:new Date().toISOString(),app:'prasek-slm',schema:3},null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob), d=new Date(), a=document.createElement('a'); a.href=url;
+  a.download=`sklad-slm-${dISO(d).replace(/-/g,'')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}.json`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000); toast('Záloha exportována'); }
+function importData(file){ if(!file)return; const r=new FileReader();
+  r.onload=()=>{ try{ const o=JSON.parse(r.result);
+      if(!o||!Array.isArray(o.materials)||!Array.isArray(o.movements))throw new Error('Neplatný soubor');
+      if(!confirm('Nahradit všechna současná data obsahem zálohy?'))return;
+      state=migrate(o); delete state.exportedAt; save(); go('prehled'); toast('Záloha načtena');
+    }catch(e){ toast('Soubor se nepodařilo načíst: '+e.message,true); } q('#importFile').value=''; };
+  r.readAsText(file); }
+function resetAll(){ if(!confirm('Opravdu vymazat VŠECHNA data z tohoto zařízení?'))return;
+  if(!confirm('Poslední potvrzení — data budou nenávratně smazána.'))return;
+  state=defaultState(); save(); go('prehled'); toast('Data vymazána'); }
+
+/* ===================== toast + ticker + boot ===================== */
+let tT=null;
+function toast(m,err){ const t=q('#toast'); t.textContent=m; t.className='toast show'+(err?' err':'');
+  clearTimeout(tT); tT=setTimeout(()=>t.className='toast'+(err?' err':''),3200); }
+qa('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.view));
+function startTicker(){ clearInterval(ticker); ticker=setInterval(()=>{
+  if(!state)return;
+  const changed=tickJobs();
+  if(changed){ save(); return; }
+  if(view==='prehled'&&!modalOpen()&&state.jobs.some(j=>j.status==='running')) render();
+},15000); }
+(async function(){ try{ state=await Store.load(); }catch(e){ state=null; }
+  if(!state){ state=defaultState(); await Store.save(state); } else state=migrate(state);
+  tickJobs(); render(); startTicker(); })();
+
+/* ===================== service worker (offline běh) ===================== */
+/* Funguje jen přes https:// nebo localhost. Jinde tiše neudělá nic. */
+if('serviceWorker' in navigator && location.protocol!=='file:'){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').then(reg=>{
+      reg.addEventListener('updatefound',()=>{
+        const nw=reg.installing; if(!nw)return;
+        nw.addEventListener('statechange',()=>{
+          /* nová verze čeká a stará běží → nabídnout přepnutí, nikdy nepřerušovat práci sám */
+          if(nw.state==='installed'&&navigator.serviceWorker.controller){
+            const bar=q('#updBar'); bar.classList.add('show');
+            q('#updBtn').onclick=()=>{ bar.classList.remove('show'); nw.postMessage({type:'SKIP_WAITING'}); };
+          }
+        });
+      });
+      setInterval(()=>reg.update().catch(()=>{}), 3600000);   // kontrola 1× za hodinu
+    }).catch(()=>{});
+    let reloaded=false;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      if(reloaded)return; reloaded=true; location.reload();
+    });
+  });
+}
+</script>
+</body>
+</html>
