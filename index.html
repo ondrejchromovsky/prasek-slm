@@ -291,6 +291,28 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .computed.big .v{font-size:1.5rem}
 .computed.est{background:var(--est-soft)} .computed.est .v{color:var(--est)} .computed.est .k{color:var(--est)}
 
+/* --- vlastní číselník: nezávislý na systémové klávesnici iPadOS --- */
+.pad{position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:70; display:none;
+  width:100%; max-width:560px; background:var(--surface); border-top:1px solid var(--line-strong);
+  border-radius:18px 18px 0 0; box-shadow:0 -10px 40px rgba(0,0,0,.22);
+  padding:12px 12px calc(12px + env(safe-area-inset-bottom))}
+.pad.show{display:block}
+.pad-top{display:flex; align-items:baseline; gap:10px; padding:2px 6px 10px}
+.pad-top .pl{font-size:.74rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint)}
+.pad-top .pv{margin-left:auto; font-family:var(--mono); font-variant-numeric:tabular-nums;
+  font-size:1.7rem; font-weight:650; letter-spacing:-.02em; line-height:1}
+.pad-top .pu{font-size:.85rem; font-weight:600; color:var(--ink-faint)}
+.pad-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+.pad-grid button{border:1px solid var(--line-strong); background:var(--surface-2); border-radius:12px;
+  font-family:var(--mono); font-size:1.5rem; font-weight:650; color:var(--ink); height:60px; cursor:pointer;
+  -webkit-tap-highlight-color:transparent; touch-action:manipulation}
+.pad-grid button:active{background:var(--accent-soft); border-color:var(--accent)}
+.pad-grid button.act{font-family:var(--sans); font-size:1rem; background:var(--surface); color:var(--ink-soft)}
+.pad-grid button.ok{grid-column:4; grid-row:2/5; background:var(--accent); border-color:var(--accent); color:#fff;
+  font-family:var(--sans); font-size:1rem; height:auto}
+.pad-grid button.ok:active{background:var(--accent-deep)}
+.pad-grid button:disabled{opacity:.3; cursor:default}
+.inp.padding-target{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
 .toast{position:fixed; left:50%; bottom:calc(26px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(20px);
   background:var(--ink); color:#fff; padding:12px 20px; border-radius:12px; font-weight:600; font-size:.92rem;
   box-shadow:0 8px 30px rgba(0,0,0,.28); opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:80; max-width:90vw}
@@ -342,7 +364,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.2 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.3 · sklad + odhady tisku</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -355,6 +377,10 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
     <div class="modal-foot"><button class="btn secondary" id="modalCancel">Zrušit</button>
       <button class="btn" id="modalSubmit">Uložit</button></div>
   </div>
+</div>
+<div class="pad" id="pad" role="group" aria-label="Číselník">
+  <div class="pad-top"><span class="pl" id="padLbl"></span><span class="pv" id="padVal">0</span><span class="pu" id="padUnit"></span></div>
+  <div class="pad-grid" id="padGrid"></div>
 </div>
 <div class="toast" id="toast"></div>
 <div class="upd" id="updBar"><span>Je dostupná nová verze</span><button id="updBtn">Aktualizovat</button></div>
@@ -611,6 +637,7 @@ function render(){
   else if(view==='historie'){m.innerHTML=vHistorie(); qa('.filters button').forEach(b=>b.onclick=()=>{histFilter=b.dataset.f;render();});}
   else if(view==='nastaveni')m.innerHTML=vNastaveni();
   q('#storeMode').textContent=Store.mode();
+  wireNumpad(m);
 }
 const emptyBox=(big,txt,btn,fn)=>`<div class="empty"><div class="big">${big}</div><p>${txt}</p>${btn?`<button class="btn" onclick="${fn}">${btn}</button>`:''}</div>`;
 function go(v){ view=v; render(); window.scrollTo(0,0); }
@@ -823,13 +850,15 @@ function openModal(icon,title,body,onSubmit,label,cls){
   q('#modalErr').textContent=''; const sb=q('#modalSubmit');
   sb.textContent=label||'Uložit'; sb.className='btn'+(cls?' '+cls:'');
   modalSubmit=onSubmit; q('#backdrop').classList.add('show'); q('#modalBody').scrollTop=0;
+  wireNumpad(q('#modalBody'));
   /* Fokus předostíráme jen na zařízeních s myší. Na dotykovém iOS by se pole tvářilo
      jako aktivní, klávesnice by se bez gesta neotevřela a první klepnutí obsluhy
      by se ztratilo, protože by nešlo o změnu fokusu. */
   if(FINE_POINTER) setTimeout(()=>{const f=q('#modalBody').querySelector('input:not([type=hidden]),select');
     if(f&&f.type!=='file')f.focus();},40);
 }
-const closeModal=()=>{q('#backdrop').classList.remove('show'); modalSubmit=null;};
+const closeModal=()=>{ if(typeof closePad==='function')closePad(false);
+  q('#backdrop').classList.remove('show'); modalSubmit=null; };
 const mErr=m=>{q('#modalErr').textContent=m;};
 const modalOpen=()=>q('#backdrop').classList.contains('show');
 q('#modalSubmit').onclick=()=>{ if(modalSubmit&&modalSubmit()!==false) closeModal(); };
@@ -838,23 +867,94 @@ q('#backdrop').addEventListener('click',e=>{if(e.target===q('#backdrop'))closeMo
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen())closeModal();});
 q('#opSel').onchange=function(){state.currentOperatorId=this.value||null; save();};
 
-/* --- klávesnice na iPadu ---
-   iOS při vysunuté klávesnici nezmenší stránku, jen viditelnou oblast. Bez tohoto
-   by dialog u spodní hrany zůstal částečně pod klávesnicí. */
+/* --- klávesnice a číselník ---
+   iPadOS má dlouhodobou chybu, kdy se u nainstalovaných webových aplikací systémová
+   klávesnice neobjeví. Číselná pole proto obsluhujeme vlastním číselníkem a systémovou
+   klávesnici u nich vůbec nevoláme (readonly). Na zařízeních s myší zůstává psaní běžné. */
+let padTarget=null, padBuf='', padFresh=true, padH=0, sysKb=0;
+const applyOffset=()=>document.documentElement.style.setProperty('--kb', Math.max(padH,sysKb)+'px');
+
 if(window.visualViewport){
-  const vv=window.visualViewport, root=document.documentElement;
+  const vv=window.visualViewport;
   const sync=()=>{
     const kb=Math.round(window.innerHeight-(vv.height+vv.offsetTop));
-    root.style.setProperty('--kb', (kb>60?kb:0)+'px');      // <60 px = jen lišta, ne klávesnice
-    root.style.setProperty('--vvh', Math.round(vv.height)+'px');
+    sysKb = kb>60?kb:0;                                   // pod 60 px jde o lištu, ne klávesnici
+    document.documentElement.style.setProperty('--vvh', Math.round(vv.height)+'px');
+    applyOffset();
   };
   vv.addEventListener('resize',sync); vv.addEventListener('scroll',sync); sync();
 }
-/* po klepnutí do pole ho posunout do středu dialogu, ať ho klávesnice nezakryje */
+/* po klepnutí do pole ho posunout do středu dialogu, ať ho nic nezakryje */
 q('#modalBody').addEventListener('focusin',e=>{
   if(!e.target.matches('input,select,textarea'))return;
   setTimeout(()=>{ try{ e.target.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_){} },280);
 });
+
+const PAD_KEYS=[['7'],['8'],['9'],['C','act'],['4'],['5'],['6'],['Hotovo','ok'],['1'],['2'],['3'],['0'],[',','act'],['⌫','act']];
+function buildPad(){
+  const g=q('#padGrid'); if(g.childElementCount)return;
+  g.innerHTML=PAD_KEYS.map(([k,cls])=>`<button type="button" class="${cls||''}" data-k="${esc(k)}">${esc(k)}</button>`).join('');
+  g.addEventListener('click',e=>{ const b=e.target.closest('button'); if(b)padKey(b.dataset.k); });
+}
+const padDecimal=()=>padTarget&&padTarget.getAttribute('inputmode')!=='numeric';
+function padKey(k){
+  if(!padTarget)return;
+  if(k==='Hotovo'){ closePad(true); return; }
+  if(k==='C'){ padBuf=''; padFresh=false; }
+  else if(k==='⌫'){ padBuf=padBuf.slice(0,-1); padFresh=false; }
+  else if(k===','){
+    if(!padDecimal())return;
+    if(padFresh){ padBuf='0'; padFresh=false; }
+    if(padBuf.includes(','))return;
+    padBuf=(padBuf||'0')+',';
+  } else {
+    /* první číslice přepíše předvyplněnou hodnotu, jako na průmyslovém terminálu */
+    if(padFresh){ padBuf=''; padFresh=false; }
+    if(padBuf.replace(/[^0-9]/g,'').length>=9)return;
+    padBuf=(padBuf==='0'?'':padBuf)+k;
+  }
+  padTarget.value=padBuf;
+  q('#padVal').textContent=padBuf||'0';
+  padTarget.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function openPad(inp){
+  if(FINE_POINTER)return;
+  buildPad(); padTarget=inp; padBuf=inp.value||''; padFresh=true;
+  const box=inp.closest('.fld');
+  const unitSpan=inp.parentElement&&inp.parentElement.querySelector('span');
+  q('#padLbl').textContent=(box&&box.querySelector('.fldlabel')?box.querySelector('.fldlabel').textContent:'Hodnota')
+    +(unitSpan&&/^(dd|hh|mm)$/.test(unitSpan.textContent)?' · '+unitSpan.textContent:'');
+  q('#padUnit').textContent=inp.closest('.inp-wrap')?'g':'';
+  q('#padVal').textContent=padBuf||'0';
+  qa('#padGrid button').forEach(b=>{ if(b.dataset.k===',') b.disabled=!padDecimal(); });
+  qa('.padding-target').forEach(e=>e.classList.remove('padding-target'));
+  inp.classList.add('padding-target');
+  const pad=q('#pad'); pad.classList.add('show');
+  padH=pad.offsetHeight; applyOffset();
+  setTimeout(()=>{ try{ inp.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_){} },120);
+}
+function closePad(commit){
+  const pad=q('#pad'); pad.classList.remove('show'); padH=0; applyOffset();
+  if(padTarget){
+    padTarget.classList.remove('padding-target');
+    if(commit) padTarget.dispatchEvent(new Event('change',{bubbles:true}));
+    padTarget.blur();
+  }
+  padTarget=null; padBuf='';
+}
+/* číselná pole: zakázat systémovou klávesnici a otevřít vlastní číselník */
+function wireNumpad(root){
+  if(FINE_POINTER||!root)return;
+  qa('input[inputmode="decimal"],input[inputmode="numeric"],input[type="number"]',root).forEach(inp=>{
+    if(inp.dataset.pad)return; inp.dataset.pad='1'; inp.readOnly=true;
+    inp.addEventListener('click',()=>openPad(inp));
+    inp.addEventListener('focus',()=>openPad(inp));
+  });
+}
+if(!FINE_POINTER){
+  new MutationObserver(()=>wireNumpad(q('#modalBody')))
+    .observe(q('#modalBody'),{childList:true,subtree:true});
+}
 q('#undoBtn').onclick=()=>{ const u=state.undo[state.undo.length-1]; if(!u)return;
   if(confirm(`Anulovat poslední operaci?\n\n${u.label}`)) undoLast(); };
 
