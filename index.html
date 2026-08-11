@@ -236,11 +236,12 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .empty p{max-width:440px; margin:0 auto 16px}
 
 /* ---- modal ---- */
-.backdrop{position:fixed; inset:0; z-index:60; background:rgba(20,26,32,.42); display:none; align-items:flex-end; justify-content:center}
+.backdrop{position:fixed; inset:0; z-index:60; background:rgba(20,26,32,.42); display:none; align-items:flex-end;
+  justify-content:center; padding-bottom:var(--kb,0px)}
 .backdrop.show{display:flex}
-@media(min-width:640px){ .backdrop{align-items:center; padding:24px} }
+@media(min-width:640px){ .backdrop{align-items:center; padding:24px; padding-bottom:calc(24px + var(--kb,0px))} }
 .modal{background:var(--surface); width:100%; max-width:540px; border-radius:20px 20px 0 0;
-  box-shadow:0 -8px 40px rgba(0,0,0,.2); max-height:93vh; display:flex; flex-direction:column}
+  box-shadow:0 -8px 40px rgba(0,0,0,.2); max-height:min(93vh, calc(var(--vvh, 100vh) * .93)); display:flex; flex-direction:column}
 @media(min-width:640px){ .modal{border-radius:18px} }
 .modal-head{display:flex; align-items:center; gap:12px; padding:18px 20px 12px}
 .modal-head .m-ico{width:38px; height:38px; border-radius:10px; background:var(--accent-soft); color:var(--accent-deep);
@@ -341,7 +342,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.1 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.2 · sklad + odhady tisku</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -368,6 +369,8 @@ const now=()=>Date.now();
 const r1=x=>Math.round((x+Number.EPSILON)*10)/10;
 const EPS=0.05;
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+/* true jen tam, kde je myš — na dotykových zařízeních se fokus nepředostírá */
+const FINE_POINTER = !!(window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches);
 const esc=s=>(''+(s==null?'':s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function parseG(v){ v=(''+v).replace(/\s|\u00a0/g,'').trim(); if(v==='')return NaN;
   if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.');
@@ -819,8 +822,12 @@ function openModal(icon,title,body,onSubmit,label,cls){
   q('#modalIco').innerHTML=ico(icon); q('#modalTitle').textContent=title; q('#modalBody').innerHTML=body;
   q('#modalErr').textContent=''; const sb=q('#modalSubmit');
   sb.textContent=label||'Uložit'; sb.className='btn'+(cls?' '+cls:'');
-  modalSubmit=onSubmit; q('#backdrop').classList.add('show');
-  setTimeout(()=>{const f=q('#modalBody').querySelector('input:not([type=hidden]),select'); if(f&&f.type!=='file')f.focus();},40);
+  modalSubmit=onSubmit; q('#backdrop').classList.add('show'); q('#modalBody').scrollTop=0;
+  /* Fokus předostíráme jen na zařízeních s myší. Na dotykovém iOS by se pole tvářilo
+     jako aktivní, klávesnice by se bez gesta neotevřela a první klepnutí obsluhy
+     by se ztratilo, protože by nešlo o změnu fokusu. */
+  if(FINE_POINTER) setTimeout(()=>{const f=q('#modalBody').querySelector('input:not([type=hidden]),select');
+    if(f&&f.type!=='file')f.focus();},40);
 }
 const closeModal=()=>{q('#backdrop').classList.remove('show'); modalSubmit=null;};
 const mErr=m=>{q('#modalErr').textContent=m;};
@@ -830,6 +837,24 @@ q('#modalCancel').onclick=closeModal; q('#modalX').onclick=closeModal;
 q('#backdrop').addEventListener('click',e=>{if(e.target===q('#backdrop'))closeModal();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen())closeModal();});
 q('#opSel').onchange=function(){state.currentOperatorId=this.value||null; save();};
+
+/* --- klávesnice na iPadu ---
+   iOS při vysunuté klávesnici nezmenší stránku, jen viditelnou oblast. Bez tohoto
+   by dialog u spodní hrany zůstal částečně pod klávesnicí. */
+if(window.visualViewport){
+  const vv=window.visualViewport, root=document.documentElement;
+  const sync=()=>{
+    const kb=Math.round(window.innerHeight-(vv.height+vv.offsetTop));
+    root.style.setProperty('--kb', (kb>60?kb:0)+'px');      // <60 px = jen lišta, ne klávesnice
+    root.style.setProperty('--vvh', Math.round(vv.height)+'px');
+  };
+  vv.addEventListener('resize',sync); vv.addEventListener('scroll',sync); sync();
+}
+/* po klepnutí do pole ho posunout do středu dialogu, ať ho klávesnice nezakryje */
+q('#modalBody').addEventListener('focusin',e=>{
+  if(!e.target.matches('input,select,textarea'))return;
+  setTimeout(()=>{ try{ e.target.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_){} },280);
+});
 q('#undoBtn').onclick=()=>{ const u=state.undo[state.undo.length-1]; if(!u)return;
   if(confirm(`Anulovat poslední operaci?\n\n${u.label}`)) undoLast(); };
 
