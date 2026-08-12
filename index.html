@@ -364,7 +364,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.3 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.4 · sklad + odhady tisku</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -395,8 +395,6 @@ const now=()=>Date.now();
 const r1=x=>Math.round((x+Number.EPSILON)*10)/10;
 const EPS=0.05;
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
-/* true jen tam, kde je myš — na dotykových zařízeních se fokus nepředostírá */
-const FINE_POINTER = !!(window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches);
 const esc=s=>(''+(s==null?'':s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function parseG(v){ v=(''+v).replace(/\s|\u00a0/g,'').trim(); if(v==='')return NaN;
   if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.');
@@ -450,6 +448,7 @@ function defaultState(){
       {id:uid(),machineId:m1,materialId:a,layerHeight:60,grooves:60,massPerGroove:1.2,fillRate:300}
     ],
     jobs:[], batches:[], containers:[], movements:[], events:[], voids:[], undo:[],
+    ui:{lastMachineId:null,lastMaterialId:null},
     settings:{dryingWarnDays:14}, currentOperatorId:op };
 }
 function migrate(s){
@@ -469,6 +468,7 @@ function migrate(s){
   s.machines=s.machines||[{id:uid(),name:'Stroj 1',materialId:null}];
   if(s.version<3){ s.configs=s.configs||[]; s.jobs=s.jobs||[]; s.version=3; }
   s.configs=s.configs||[]; s.jobs=s.jobs||[];
+  s.ui=s.ui||{lastMachineId:null,lastMaterialId:null};
   return s;
 }
 const matById=id=>state.materials.find(m=>m.id===id);
@@ -477,6 +477,14 @@ const contById=id=>state.containers.find(c=>c.id===id);
 const batchById=id=>state.batches.find(b=>b.id===id);
 const opById=id=>state.operators.find(o=>o.id===id);
 const cfgById=id=>state.configs.find(c=>c.id===id);
+/* předvolby: naposledy použitý stroj a materiál, pokud jsou v nabídce */
+const pickMach=(pref,list)=>{ const ids=(list||state.machines).filter(Boolean).map(m=>m.id);
+  for(const c of [pref,state.ui.lastMachineId]) if(c&&ids.includes(c))return c; return ids[0]||null; };
+const pickMat=(pref,list)=>{ const ids=(list||state.materials).filter(Boolean).map(m=>m.id);
+  for(const c of [pref,state.ui.lastMaterialId]) if(c&&ids.includes(c))return c; return ids[0]||null; };
+function rememberSel(){ const m=q('#fMach'), t=q('#fMat');
+  if(m&&m.value&&machById(m.value)) state.ui.lastMachineId=m.value;
+  if(t&&t.value&&matById(t.value)) state.ui.lastMaterialId=t.value; }
 
 /* balances — přesná vrstva (gramy) */
 function balances(){ const b={}; for(const m of state.movements){ b[m.to]=(b[m.to]||0)+m.amount; b[m.from]=(b[m.from]||0)-m.amount; } return b; }
@@ -637,7 +645,6 @@ function render(){
   else if(view==='historie'){m.innerHTML=vHistorie(); qa('.filters button').forEach(b=>b.onclick=()=>{histFilter=b.dataset.f;render();});}
   else if(view==='nastaveni')m.innerHTML=vNastaveni();
   q('#storeMode').textContent=Store.mode();
-  wireNumpad(m);
 }
 const emptyBox=(big,txt,btn,fn)=>`<div class="empty"><div class="big">${big}</div><p>${txt}</p>${btn?`<button class="btn" onclick="${fn}">${btn}</button>`:''}</div>`;
 function go(v){ view=v; render(); window.scrollTo(0,0); }
@@ -685,7 +692,7 @@ function vPrehled(){
         <span class="sep"></span>
         <button class="pri" onclick="opNaplneni('${mc.id}')">Naplnit</button>
         <button onclick="opPrepady('${mc.id}')" ${total<=EPS?'disabled':''}>Odebrat přepady</button>
-        <button onclick="opVyprazdneni('${mc.id}')" ${total<=EPS?'disabled':''}>Vyprázdnit</button>
+        <button onclick="opPreseti('${mc.id}')" ${(!mat||botMass(b,mat.id)<=EPS)?'disabled':''}>Přesetí</button>
       </div></div>`;
   }).join('');
   return `<div class="viewhead"><h2>Přehled strojů</h2><span class="sub">Hmotnost ve stroji je přesná. Zásobník a přepady jsou odhady (~) z konfigurace tisku.</span></div><div class="cards">${cards}</div>`;
@@ -836,7 +843,7 @@ function vNastaveni(){
   ${P_('naplneni','Kontejnery',`<p class="tnote" style="margin:0 0 12px">Sady kontejnerů jsou dedikované materiálu — AlSi10Mg č. 1 je jiná nádoba než 316L č. 1.</p>`+conts)}
   ${P_('obsluha','Obsluha',ops+`<div style="margin-top:14px"><button class="btn secondary" onclick="addOperator()">+ Přidat obsluhu</button></div>`)}
   ${P_('suseni','Hlídání sušení',`<label class="fld" style="margin:0"><span class="fldlabel">Upozornit „k přesušení" po počtu dní (0 = vypnuto)</span>
-    <input class="inp" type="number" min="0" step="1" value="${state.settings.dryingWarnDays}" onchange="setDryDays(this.value)"></label>`)}
+    <input class="inp" id="dryDays" type="text" inputmode="numeric" value="${state.settings.dryingWarnDays}" onchange="setDryDays(this.value)"></label>`)}
   ${P_('data','Data a zálohy',`<p class="tnote" style="margin:0 0 14px">Data žijí jen v tomto zařízení. Zálohu exportujte na konci směny.</p>
     <div class="settings-actions"><button class="btn" onclick="exportData()">Exportovat zálohu</button>
     <button class="btn secondary" onclick="q('#importFile').click()">Importovat zálohu</button>
@@ -850,18 +857,14 @@ function openModal(icon,title,body,onSubmit,label,cls){
   q('#modalErr').textContent=''; const sb=q('#modalSubmit');
   sb.textContent=label||'Uložit'; sb.className='btn'+(cls?' '+cls:'');
   modalSubmit=onSubmit; q('#backdrop').classList.add('show'); q('#modalBody').scrollTop=0;
-  wireNumpad(q('#modalBody'));
-  /* Fokus předostíráme jen na zařízeních s myší. Na dotykovém iOS by se pole tvářilo
-     jako aktivní, klávesnice by se bez gesta neotevřela a první klepnutí obsluhy
-     by se ztratilo, protože by nešlo o změnu fokusu. */
-  if(FINE_POINTER) setTimeout(()=>{const f=q('#modalBody').querySelector('input:not([type=hidden]),select');
-    if(f&&f.type!=='file')f.focus();},40);
+  /* Fokus nikdy nepředostíráme: iOS by pole označil za aktivní, klávesnici neotevřel
+     a první klepnutí obsluhy by se ztratilo, protože by nešlo o změnu fokusu. */
 }
 const closeModal=()=>{ if(typeof closePad==='function')closePad(false);
   q('#backdrop').classList.remove('show'); modalSubmit=null; };
 const mErr=m=>{q('#modalErr').textContent=m;};
 const modalOpen=()=>q('#backdrop').classList.contains('show');
-q('#modalSubmit').onclick=()=>{ if(modalSubmit&&modalSubmit()!==false) closeModal(); };
+q('#modalSubmit').onclick=()=>{ if(modalSubmit&&modalSubmit()!==false){ rememberSel(); Store.save(state); closeModal(); } };
 q('#modalCancel').onclick=closeModal; q('#modalX').onclick=closeModal;
 q('#backdrop').addEventListener('click',e=>{if(e.target===q('#backdrop'))closeModal();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen())closeModal();});
@@ -918,7 +921,6 @@ function padKey(k){
   padTarget.dispatchEvent(new Event('input',{bubbles:true}));
 }
 function openPad(inp){
-  if(FINE_POINTER)return;
   buildPad(); padTarget=inp; padBuf=inp.value||''; padFresh=true;
   const box=inp.closest('.fld');
   const unitSpan=inp.parentElement&&inp.parentElement.querySelector('span');
@@ -942,19 +944,19 @@ function closePad(commit){
   }
   padTarget=null; padBuf='';
 }
-/* číselná pole: zakázat systémovou klávesnici a otevřít vlastní číselník */
-function wireNumpad(root){
-  if(FINE_POINTER||!root)return;
-  qa('input[inputmode="decimal"],input[inputmode="numeric"],input[type="number"]',root).forEach(inp=>{
-    if(inp.dataset.pad)return; inp.dataset.pad='1'; inp.readOnly=true;
-    inp.addEventListener('click',()=>openPad(inp));
-    inp.addEventListener('focus',()=>openPad(inp));
-  });
-}
-if(!FINE_POINTER){
-  new MutationObserver(()=>wireNumpad(q('#modalBody')))
-    .observe(q('#modalBody'),{childList:true,subtree:true});
-}
+/* Číselná pole obsluhuje vlastní číselník. Rozhodujeme podle SKUTEČNÉHO typu doteku,
+   ne podle media dotazu — ten na iPadu hlásí „jemný ukazatel" i tam, kde se klepe prstem,
+   a číselník by se pak nikdy neotevřel. Platí pro celou aplikaci včetně polí přidaných
+   za běhu, protože posloucháme na dokumentu. */
+const isNumField=el=>!!el&&el.tagName==='INPUT'&&
+  (el.type==='number'||['numeric','decimal'].includes(el.getAttribute('inputmode')||''));
+document.addEventListener('pointerdown',e=>{
+  const inp=e.target&&e.target.closest?e.target.closest('input'):null;
+  if(!isNumField(inp))return;
+  if(e.pointerType==='mouse'){ inp.readOnly=false; return; }   // myš → běžné psaní
+  inp.readOnly=true;                                           // dotyk → bez systémové klávesnice
+  openPad(inp);
+},true);
 q('#undoBtn').onclick=()=>{ const u=state.undo[state.undo.length-1]; if(!u)return;
   if(confirm(`Anulovat poslední operaci?\n\n${u.label}`)) undoLast(); };
 
@@ -991,7 +993,7 @@ function fillContainer(cid,materialId,kind,cycles,codeInput){
 function opStart(machineId){
   const cand=state.machines.filter(m=>m.materialId&&!runningJob(m.id));
   if(!cand.length){ toast('Žádný volný stroj s nasazeným materiálem.',true); return; }
-  const mid=machineId&&cand.some(m=>m.id===machineId)?machineId:cand[0].id;
+  const mid=pickMach(machineId,cand);
   openModal('start','Start tiskové úlohy',
     machSelect('fMach',m=>m.materialId&&!runningJob(m.id),mid)&&fld('Stroj',machSelect('fMach',m=>m.materialId&&!runningJob(m.id),mid))+
     `<div id="mi"></div>`+
@@ -1052,7 +1054,7 @@ function opStart(machineId){
 function opDrazky(machineId){
   const jobs=state.jobs.filter(j=>j.status==='running');
   if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
-  const mid=machineId&&jobs.some(j=>j.machineId===machineId)?machineId:jobs[0].machineId;
+  const mid=pickMach(machineId,jobs.map(j=>machById(j.machineId)));
   openModal('drazky','Změna počtu drážek',
     fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
     fld('Vrstva, ve které změna proběhla',numInput('fLayer',null,'číslo vrstvy'))+
@@ -1100,7 +1102,7 @@ function opDrazky(machineId){
 function opStop(machineId){
   const jobs=state.jobs.filter(j=>j.status==='running');
   if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
-  const mid=machineId&&jobs.some(j=>j.machineId===machineId)?machineId:jobs[0].machineId;
+  const mid=pickMach(machineId,jobs.map(j=>machById(j.machineId)));
   openModal('stop','Stop tiskové úlohy',
     fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
     fld('Vrstva, ve které tisk skončil',numInput('fLayer',null,'číslo vrstvy'),'Předvyplněno odhadem z odpočtu — přepište skutečnou hodnotou.')+
@@ -1134,9 +1136,9 @@ function opStop(machineId){
 /* ===================== MODUL 1 — operace ===================== */
 function opPrijem(){
   if(!state.materials.length){toast('Nejdřív přidejte materiál.',true);return;}
-  const first=state.materials[0].id;
+  const first=pickMat(null,state.materials);
   openModal('prijem','Příjem materiálu',
-    fld('Materiál',matSelect('fMat'))+`<div id="cw">${fld('Kontejner',contSelect('fCont',first))}</div>`+warnBox('wb')+
+    fld('Materiál',matSelect('fMat',null,first))+`<div id="cw">${fld('Kontejner',contSelect('fCont',first))}</div>`+warnBox('wb')+
     fld('Navážená hmotnost',gInput('fG'))+fld('Šarže (nepovinné)',`<input class="inp" id="fBatch" placeholder="automaticky">`)+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
       const cid=q('#fCont').value; if(!cid||q('#fCont').disabled){mErr('Vyberte kontejner.');return false;}
@@ -1153,9 +1155,9 @@ function opPrijem(){
 }
 function opSuseni(){
   if(!state.containers.length){toast('Nejdřív přidejte kontejnery.',true);return;}
-  const first=state.materials[0].id;
+  const first=pickMat(null,state.materials);
   openModal('suseni','Vysušení',
-    fld('Materiál',matSelect('fMat'))+`<div id="cw">${fld('Kontejner',contSelect('fCont',first,'full'))}</div>`+
+    fld('Materiál',matSelect('fMat',null,first))+`<div id="cw">${fld('Kontejner',contSelect('fCont',first,'full'))}</div>`+
     fld('Datum vysušení',`<input class="inp" id="fDate" type="date" value="${todayISO()}">`)+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
       const cid=q('#fCont').value; if(!cid||q('#fCont').disabled){mErr('Vyberte naplněný kontejner.');return false;}
@@ -1167,7 +1169,7 @@ function opSuseni(){
 }
 function opNaplneni(machineId){
   if(!state.machines.length){toast('Nejdřív přidejte stroj.',true);return;}
-  const mid=machineId||state.machines[0].id;
+  const mid=pickMach(machineId,state.machines);
   openModal('naplneni','Naplnění stroje',
     fld('Stroj',machSelect('fMach',null,mid))+`<div id="mi"></div><div id="cw"></div>`+
     `<div class="computed big"><span class="k">Přesune se celý obsah kontejneru</span><span class="v" id="cv">—</span></div>`+opField(),
@@ -1201,7 +1203,7 @@ function opNaplneni(machineId){
 function opPrepady(machineId){
   const b=balances(), avail=state.machines.filter(m=>m.materialId&&mMass(b,m.id)>EPS);
   if(!avail.length){toast('Žádný stroj nemá nasazený materiál.',true);return;}
-  const mid=machineId&&avail.some(m=>m.id===machineId)?machineId:avail[0].id;
+  const mid=pickMach(machineId,avail);
   openModal('prepady','Odebrání přepadů',
     fld('Stroj',machSelect('fMach',m=>m.materialId&&mMass(b,m.id)>EPS,mid))+`<div id="mi"></div>`+
     fld('Zvážené množství z přepadů',gInput('fG'),'Přesune se do flašek. Odhad zaplnění přepadů se vynuluje.')+opField(),
@@ -1225,7 +1227,7 @@ function opPrepady(machineId){
 function opVyprazdneni(machineId){
   const b=balances(), avail=state.machines.filter(m=>m.materialId&&mMass(b,m.id)>EPS);
   if(!avail.length){toast('Žádný stroj nemá materiál k vyvezení.',true);return;}
-  const mid=machineId&&avail.some(m=>m.id===machineId)?machineId:avail[0].id;
+  const mid=pickMach(machineId,avail);
   openModal('vyprazdneni','Vyprázdnění stroje',
     `<div class="modal-info"><span class="k">Přesune vyvezený materiál ze stroje. Může proběhnout na víc kroků — stav stroje se nenuluje.</span></div>`+
     fld('Stroj',machSelect('fMach',m=>m.materialId&&mMass(b,m.id)>EPS,mid))+`<div id="mi"></div>`+
@@ -1257,11 +1259,13 @@ function opVyprazdneni(machineId){
     else q('#wb').classList.add('hide'); };
   q('#fMach').onchange=refresh; qa('input[name=dst]').forEach(r=>r.onchange=refresh); refresh();
 }
-function opPreseti(){
+function opPreseti(machineId){
   const b=balances(), piles=state.materials.filter(m=>botMass(b,m.id)>EPS);
   if(!piles.length){toast('V žádných flaškách není materiál k přesetí.',true);return;}
+  const mc0=machineId?machById(machineId):null;
+  const startMat=pickMat(mc0&&mc0.materialId&&botMass(b,mc0.materialId)>EPS?mc0.materialId:null,piles);
   openModal('preseti','Přesetí',
-    fld('Materiál',matSelect('fMat',m=>botMass(b,m.id)>EPS))+`<div id="pi"></div>`+
+    fld('Materiál',matSelect('fMat',m=>botMass(b,m.id)>EPS,startMat))+`<div id="pi"></div>`+
     fld('Kam přeseto',`<div class="radios"><label><input type="radio" name="dst" value="mach" checked>Do stroje</label>
       <label><input type="radio" name="dst" value="cont">Do kontejneru</label></div>`)+
     `<div id="dx"></div>`+warnBox('wb')+
@@ -1287,8 +1291,9 @@ function opPreseti(){
     q('#pi').innerHTML=`<div class="modal-info"><span class="k">Ve flaškách:</span> <b>${fmtG(botMass(bb,mat))} g</b> <span class="k">(včetně nezměřeného odpadu)</span></div>`;
     const dst=(q('input[name=dst]:checked')||{}).value;
     q('#dx').innerHTML=dst==='cont'
-      ? fld('Cílový kontejner',contSelect('fCont',mat))+fld('Cyklus recyklátu',`<input class="inp" id="fCyc" type="number" min="1" step="1" value="1">`,'Flašky jsou směs z více tisků — cyklus je orientační.')
-      : fld('Cílový stroj',machSelect('fMach',m=>!m.materialId||m.materialId===mat));
+      ? fld('Cílový kontejner',contSelect('fCont',mat))+fld('Cyklus recyklátu',numInput('fCyc',1),'Flašky jsou směs z více tisků — cyklus je orientační.')
+      : fld('Cílový stroj',machSelect('fMach',m=>!m.materialId||m.materialId===mat,
+          pickMach(machineId,state.machines.filter(m=>!m.materialId||m.materialId===mat))));
     const cs=q('#fCont'); if(cs&&!cs.disabled){cs.onchange=()=>showContWarn('wb',cs.value); showContWarn('wb',cs.value);}
     else q('#wb').classList.add('hide'); };
   q('#fMat').onchange=refresh; qa('input[name=dst]').forEach(r=>r.onchange=refresh); refresh();
@@ -1297,7 +1302,7 @@ function opFlaskyPrazdne(){
   const b=balances(), piles=state.materials.filter(m=>botMass(b,m.id)>EPS);
   if(!piles.length){toast('Žádné flašky nemají zůstatek.',true);return;}
   openModal('flasky','Flašky prázdné',
-    fld('Materiál',matSelect('fMat',m=>botMass(b,m.id)>EPS))+`<div id="fi"></div>`+opField(),
+    fld('Materiál',matSelect('fMat',m=>botMass(b,m.id)>EPS,pickMat(null,piles)))+`<div id="fi"></div>`+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
       const mat=q('#fMat').value, rest=botMass(balances(),mat);
       if(rest<=EPS){mErr('Ve flaškách není zůstatek.');return false;}
@@ -1312,7 +1317,7 @@ function opZmena(){
   if(!state.machines.length){toast('Nejdřív přidejte stroj.',true);return;}
   openModal('zmena','Změna materiálu',
     `<div class="modal-info"><span class="k">Odepíše evidovaný zbytek jako ztrátu a nasadí nový materiál. Použitelný prášek vyvezte předtím operací Vyprázdnění stroje.</span></div>`+
-    fld('Stroj',machSelect('fMach'))+`<div id="mi"></div>`+
+    fld('Stroj',machSelect('fMach',null,pickMach(null,state.machines)))+`<div id="mi"></div>`+
     fld('Nový nasazený materiál',`<select class="inp" id="fNew"><option value="">— žádný (nechat prázdný) —</option>${
       state.materials.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>`,
       'Stejný materiál lze zvolit i po servisním vyprázdnění.')+
@@ -1337,7 +1342,7 @@ function opKorekce(){
   if(!state.machines.length){toast('Nejdřív přidejte stroj.',true);return;}
   openModal('korekce','Ruční korekce stroje',
     `<div class="modal-info danger">Pro servis nebo když se evidence rozejde se skutečností. Odhady zásobníku a přepadů se srovnají na zadanou hodnotu.</div>`+
-    fld('Stroj',machSelect('fMach'))+`<div id="mi"></div>`+
+    fld('Stroj',machSelect('fMach',null,pickMach(null,state.machines)))+`<div id="mi"></div>`+
     fld('Skutečně zvážené množství ve stroji',gInput('fG'),'Např. 0 g po kompletním vyprázdnění při servisu.')+
     `<label class="check"><input type="checkbox" id="fKeep" checked><span>Ponechat nasazený materiál</span></label>`+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
@@ -1362,7 +1367,7 @@ function edConfig(id){
   if(!state.machines.length||!state.materials.length){toast('Nejdřív přidejte stroj a materiál.',true);return;}
   const c=id?cfgById(id):null;
   openModal('cfg',id?'Upravit konfiguraci':'Nová konfigurace',
-    `<div class="fld-row">${fld('Stroj',machSelect('fMach',null,c?c.machineId:null))}${fld('Materiál',matSelect('fMat',null,c?c.materialId:null))}</div>`+
+    `<div class="fld-row">${fld('Stroj',machSelect('fMach',null,pickMach(c?c.machineId:null,state.machines)))}${fld('Materiál',matSelect('fMat',null,pickMat(c?c.materialId:null,state.materials)))}</div>`+
     `<div class="fld-row">${fld('Výška vrstvy (µm)',numInput('fH',c?c.layerHeight:'','30'))}${fld('Drážky / vrstvu',numInput('fGr',c?c.grooves:'','40'))}</div>`+
     `<div class="fld-row">${fld('Hmotnost na drážku (g)',numInput('fMg',c?String(c.massPerGroove).replace('.',','):'','1,2'))}
       ${fld('Rychlost plnění přepadu (g/h)',numInput('fFr',c?String(c.fillRate).replace('.',','):'','180'))}</div>`,
