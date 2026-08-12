@@ -364,7 +364,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.5 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.6 · sklad + odhady tisku</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -1215,8 +1215,8 @@ function opPrepady(machineId){
     fld('Zvážené množství z přepadů',gInput('fG'),'Přesune se do flašek. Odhad zaplnění přepadů se vynuluje.')+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
       const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
-      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
-      let have=mMass(balances(),mc.id);
+      let g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      const have=mMass(balances(),mc.id);
       if(g>have+EPS){mErr(`Ve stroji je jen ${fmtG(have)} g.`);return false;}
       g=Math.min(g,have);                      // nikdy neodeber víc, než ve stroji je
       const est=ovfEst(mc.id);
@@ -1244,7 +1244,7 @@ function opVyprazdneni(machineId){
     `<div id="dx"></div>`+warnBox('wb')+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
       const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
-      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      let g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
       const have=mMass(balances(),mc.id);
       if(g>have+EPS){mErr(`Stroj eviduje jen ${fmtG(have)} g. Přebytek řešte Ruční korekcí.`);return false;}
       g=Math.min(g,have);
@@ -1280,7 +1280,7 @@ function opPreseti(machineId){
     fld('Zvážený výstup z přesévání',gInput('fG'),'Váží se jen dobrý prosetý materiál. Odpad zůstane ve flaškách.')+opField(),
     ()=>{ const op=readOp(); if(!op)return false;
       const mat=q('#fMat').value, dst=q('input[name=dst]:checked').value;
-      const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      let g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
       const have=botMass(balances(),mat);
       if(g>have+EPS){mErr(`Ve flaškách je jen ${fmtG(have)} g.`);return false;}
       g=Math.min(g,have);
