@@ -364,7 +364,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.4 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.5 · sklad + odhady tisku</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -488,9 +488,10 @@ function rememberSel(){ const m=q('#fMach'), t=q('#fMat');
 
 /* balances — přesná vrstva (gramy) */
 function balances(){ const b={}; for(const m of state.movements){ b[m.to]=(b[m.to]||0)+m.amount; b[m.from]=(b[m.from]||0)-m.amount; } return b; }
-const cMass=(b,id)=>r1(b[CONT(id)]||0);
-const mMass=(b,id)=>r1(b[MACH(id)]||0);
-const botMass=(b,mat)=>r1(b[BOTT(mat)]||0);
+/* hmotnosti nikdy nejdou do záporu — ani přesné, ani odhady */
+const cMass=(b,id)=>Math.max(0,r1(b[CONT(id)]||0));
+const mMass=(b,id)=>Math.max(0,r1(b[MACH(id)]||0));
+const botMass=(b,mat)=>Math.max(0,r1(b[BOTT(mat)]||0));
 const skladMass=(b,mat)=>r1(state.containers.filter(c=>c.materialId===mat).reduce((a,c)=>a+cMass(b,c.id),0));
 
 /* ===================== MODUL 2 — odhady tisku ===================== */
@@ -546,7 +547,10 @@ function tankEst(mid){
     if(m.type==='naplneni'||(m.type==='preseti'&&m.to===MACH(mid))) g+=m.amount;
     else if(m.type==='vyprazdneni') g-=m.amount; }
   g-=consumedIn(mid,ts,now());
-  return clamp(r1(g),0,mMass(balances(),mid));
+  /* Žádná horní mez podle hmotnosti ve stroji! Odebrání přepadů tuhle hmotnost snižuje,
+     ale zásobníku se netýká — prášek v přepadech ze zásobníku odešel už při dávkování.
+     Dřívější ořez tak strhával odhad zásobníku dolů spolu s každým odběrem přepadů. */
+  return Math.max(0,r1(g));
 }
 function ovfEst(mid){
   const t0=lastOvfReset(mid), t1=now(); let g=0;
@@ -963,6 +967,8 @@ q('#undoBtn').onclick=()=>{ const u=state.undo[state.undo.length-1]; if(!u)retur
 const fld=(l,inner,hint)=>`<label class="fld"><span class="fldlabel">${l}</span>${inner}${hint?`<span class="fldhint">${hint}</span>`:''}</label>`;
 const gInput=(id,ph='0')=>`<div class="inp-wrap"><input class="inp big" id="${id}" type="text" inputmode="decimal" placeholder="${ph}"><span class="suffix">g</span></div>`;
 const numInput=(id,val,ph)=>`<input class="inp" id="${id}" type="text" inputmode="numeric" value="${val!=null?val:''}" placeholder="${ph||''}">`;
+/* desetinná varianta — číselník u ní povolí čárku */
+const decInput=(id,val,ph)=>`<input class="inp" id="${id}" type="text" inputmode="decimal" value="${val!=null?val:''}" placeholder="${ph||''}">`;
 const opField=()=>fld('Obsluha',`<select class="inp" id="fOp"><option value="">— vyberte —</option>${
   state.operators.map(o=>`<option value="${o.id}" ${o.id===state.currentOperatorId?'selected':''}>${esc(o.name)}</option>`).join('')}</select>`);
 function readOp(){ const v=q('#fOp').value; if(!v){mErr('Vyberte obsluhu.');return null;} state.currentOperatorId=v; return v; }
@@ -1210,8 +1216,9 @@ function opPrepady(machineId){
     ()=>{ const op=readOp(); if(!op)return false;
       const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
       const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
-      const have=mMass(balances(),mc.id);
+      let have=mMass(balances(),mc.id);
       if(g>have+EPS){mErr(`Ve stroji je jen ${fmtG(have)} g.`);return false;}
+      g=Math.min(g,have);                      // nikdy neodeber víc, než ve stroji je
       const est=ovfEst(mc.id);
       pushUndo(`Odebrání přepadů ${fmtG(g)} g z ${mc.name}`);
       addMovement({type:'odebrani_prepadu',from:MACH(mc.id),to:BOTT(mc.materialId),amount:g,
@@ -1240,6 +1247,7 @@ function opVyprazdneni(machineId){
       const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
       const have=mMass(balances(),mc.id);
       if(g>have+EPS){mErr(`Stroj eviduje jen ${fmtG(have)} g. Přebytek řešte Ruční korekcí.`);return false;}
+      g=Math.min(g,have);
       const dst=q('input[name=dst]:checked').value;
       if(dst==='bott'){ pushUndo(`Vyprázdnění ${fmtG(g)} g z ${mc.name} → flašky`);
         addMovement({type:'vyprazdneni',from:MACH(mc.id),to:BOTT(mc.materialId),amount:g,materialId:mc.materialId,machineId:mc.id,operatorId:op});
@@ -1275,6 +1283,7 @@ function opPreseti(machineId){
       const g=parseG(q('#fG').value); if(isNaN(g)||g<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
       const have=botMass(balances(),mat);
       if(g>have+EPS){mErr(`Ve flaškách je jen ${fmtG(have)} g.`);return false;}
+      g=Math.min(g,have);
       if(dst==='mach'){ const mc=machById((q('#fMach')||{}).value); if(!mc){mErr('Vyberte stroj.');return false;}
         if(mc.materialId&&mc.materialId!==mat){mErr('Ve stroji je jiný materiál.');return false;}
         pushUndo(`Přesetí ${fmtG(g)} g → ${mc.name}`);
@@ -1369,8 +1378,8 @@ function edConfig(id){
   openModal('cfg',id?'Upravit konfiguraci':'Nová konfigurace',
     `<div class="fld-row">${fld('Stroj',machSelect('fMach',null,pickMach(c?c.machineId:null,state.machines)))}${fld('Materiál',matSelect('fMat',null,pickMat(c?c.materialId:null,state.materials)))}</div>`+
     `<div class="fld-row">${fld('Výška vrstvy (µm)',numInput('fH',c?c.layerHeight:'','30'))}${fld('Drážky / vrstvu',numInput('fGr',c?c.grooves:'','40'))}</div>`+
-    `<div class="fld-row">${fld('Hmotnost na drážku (g)',numInput('fMg',c?String(c.massPerGroove).replace('.',','):'','1,2'))}
-      ${fld('Rychlost plnění přepadu (g/h)',numInput('fFr',c?String(c.fillRate).replace('.',','):'','180'))}</div>`,
+    `<div class="fld-row">${fld('Hmotnost na drážku (g)',decInput('fMg',c?String(c.massPerGroove).replace('.',','):'','1,2'))}
+      ${fld('Rychlost plnění přepadu (g/h)',decInput('fFr',c?String(c.fillRate).replace('.',','):'','180'))}</div>`,
     ()=>{ const mid=q('#fMach').value, mat=q('#fMat').value;
       const h=Math.round(parseNum(q('#fH').value)), gr=Math.round(parseNum(q('#fGr').value));
       const mg=parseNum(q('#fMg').value), fr=parseNum(q('#fFr').value);
