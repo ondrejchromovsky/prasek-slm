@@ -216,7 +216,7 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .cfg-group .gh{font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint);
   padding:9px 0 4px; display:flex; align-items:center; gap:8px}
 .cfg-group .gh .sw{width:9px; height:9px; border-radius:50%}
-.cfg-row{display:grid; grid-template-columns:78px 92px 1fr 1fr auto; gap:10px; align-items:center;
+.cfg-row{display:grid; grid-template-columns:74px 88px 1fr 1fr 1fr auto; gap:10px; align-items:center;
   padding:9px 0; border-top:1px solid var(--line); font-size:.87rem}
 .cfg-row .k{font-family:var(--mono); font-weight:650}
 .cfg-row .v{font-family:var(--mono); font-variant-numeric:tabular-nums}
@@ -337,7 +337,8 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
   .trow .cbatch{grid-column:2/4} .trow .cmass{grid-row:1; grid-column:3}
   .trow .cdry,.trow .cstate{grid-column:2/4}
   .log-row{grid-template-columns:1fr auto} .log-when{grid-column:1/-1; order:-1}
-  .cfg-row{grid-template-columns:1fr 1fr auto; gap:8px}
+  .cfg-row{grid-template-columns:1fr 1fr auto; gap:8px 10px}
+  .cfg-row>div:nth-child(5){grid-column:1/3}
   .brand p{display:none}
 }
 </style>
@@ -364,7 +365,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.6 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.7 · sklad + odhady tisku</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -438,7 +439,7 @@ const MAT_COLORS=['#3b6ea5','#b5651d','#4a7c59','#7d5ba6','#b03a5b','#2b8a8a','#
 
 function defaultState(){
   const a=uid(), b=uid(), op=uid(), m1=uid(), m2=uid();
-  return { version:3,
+  return { version:4,
     materials:[{id:a,name:'AlSi10Mg',color:'#3b6ea5',density:2.67},{id:b,name:'316L',color:'#b5651d',density:7.99}],
     machines:[{id:m1,name:'Stroj 1',materialId:null},{id:m2,name:'Stroj 2',materialId:null}],
     operators:[{id:op,name:'Obsluha 1'}],
@@ -469,6 +470,11 @@ function migrate(s){
   if(s.version<3){ s.configs=s.configs||[]; s.jobs=s.jobs||[]; s.version=3; }
   s.configs=s.configs||[]; s.jobs=s.jobs||[];
   s.ui=s.ui||{lastMachineId:null,lastMaterialId:null};
+  if(s.version<4){          // dávkování je na 2 vrstvy — dřívější odhady byly dvojnásobné
+    s.events.forEach(e=>{ if(['job_change','job_stop'].includes(e.type)&&typeof e.consumed==='number')
+      e.consumed=Math.round(e.consumed/2*10)/10; });
+    s.version=4;
+  }
   return s;
 }
 const matById=id=>state.materials.find(m=>m.id===id);
@@ -517,7 +523,11 @@ function layerInSeg(j,s,ts){
 }
 function currentLayer(j){ return j.status==='running'? layerInSeg(j,lastSeg(j),Math.min(now(),jobEnd(j))) : j.endLayer; }
 function jobProgress(j){ if(j.status!=='running')return 1; return clamp((now()-j.startTs)/j.totalMs,0,1); }
-const segConsumed=(j,s,a,b)=>Math.max(0,layerInSeg(j,s,b)-layerInSeg(j,s,a))*s.grooves*s.massPerGroove;
+/* „Dávkování" je počet drážek na DVĚ vrstvy — hmotnost na jednu vrstvu je tedy poloviční.
+   Dělitel je schválně jen na tomhle jediném místě, aby se nedal nikde přehlédnout. */
+const DAVKA_VRSTEV=2;
+const layerMass=c=>c.grooves*c.massPerGroove/DAVKA_VRSTEV;      // g na jednu vrstvu
+const segConsumed=(j,s,a,b)=>Math.max(0,layerInSeg(j,s,b)-layerInSeg(j,s,a))*layerMass(s);
 
 /* spotřeba (ze zásobníku do komory) v časovém okně */
 function consumedIn(mid,t0,t1){
@@ -561,7 +571,7 @@ function ovfEst(mid){
 }
 /* materiál potřebný do konce tisku při aktuální konfiguraci */
 function needToFinish(j){ const s=lastSeg(j);
-  return r1(Math.max(0,j.totalLayers-currentLayer(j))*s.grooves*s.massPerGroove); }
+  return r1(Math.max(0,j.totalLayers-currentLayer(j))*layerMass(s)); }
 /* automatické ukončení odpočtem */
 function tickJobs(){ let ch=false;
   for(const j of state.jobs){ if(j.status!=='running')continue;
@@ -671,7 +681,7 @@ function vPrehled(){
           <span class="r">${Math.round(pct)} % · zbývá ${fmtDur(jobEnd(j)-now())}</span></div>
         <div class="prog-bar"><div class="prog-fill" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="prog-foot"><span class="need">Do konce ~<b>${fmtG(need)} g</b></span>
-          <span class="cfg">${j.layerHeight} µm · ${s.grooves} drážek · ${fmtG(s.massPerGroove)} g/drážku</span></div></div>`;
+          <span class="cfg">${j.layerHeight} µm · dávkování ${s.grooves} · ${fmtG(layerMass(s))} g/vrstvu</span></div></div>`;
       if(need>tank+EPS) alert=`<div class="alert bad">Zásobník nemusí vystačit — odhad ${fmtG(tank)} g, do konce je potřeba ~${fmtG(need)} g.</div>`;
     }
     return `<div class="card" style="--c:${mat?mat.color:'#b9c0c7'}">
@@ -690,7 +700,7 @@ function vPrehled(){
       ${alert}${prog}
       <div class="card-foot"><span>Flašky${mat?' '+esc(mat.name):''} <b>${mat?fmtG(bott)+' g':'—'}</b></span></div>
       <div class="card-acts">
-        ${j?`<button class="est" onclick="opDrazky('${mc.id}')">Změnit drážky</button>
+        ${j?`<button class="est" onclick="opDrazky('${mc.id}')">Změnit dávkování</button>
              <button class="stop" onclick="opStop('${mc.id}')">Stop</button>`
            :`<button class="est" onclick="opStart('${mc.id}')" ${mat?'':'disabled'}>Start tisku</button>`}
         <span class="sep"></span>
@@ -746,8 +756,8 @@ function vOperace(){
     ${mk('opPrepady()','prepady','Odebrání přepadů','Ze stroje do flašek · resetuje odhad přepadů')}
     ${mk('opVyprazdneni()','vyprazdneni','Vyprázdnění stroje','Vyvézt materiál do flašek nebo kontejneru (i po částech)')}
     <div class="op-group">Tisk — odhady (nemění evidenci)</div>
-    ${mk('opStart()','start','Start tiskové úlohy','Čas, vrstvy, výška vrstvy a drážky','est-op')}
-    ${mk('opDrazky()','drazky','Změna počtu drážek','Zafixuje dosavadní spotřebu a přepočítá odhad','est-op')}
+    ${mk('opStart()','start','Start tiskové úlohy','Čas, vrstvy, výška vrstvy a dávkování','est-op')}
+    ${mk('opDrazky()','drazky','Změna dávkování','Zafixuje dosavadní spotřebu a přepočítá odhad','est-op')}
     ${mk('opStop()','stop','Stop tiskové úlohy','Ukončit zadáním vrstvy','est-op')}
     <div class="op-group">Recyklace</div>
     ${mk('opPreseti()','preseti','Přesetí','Z flašek do stroje nebo kontejneru (váží se výstup)')}
@@ -783,9 +793,9 @@ function vHistorie(){
     if(it.k==='ev'&&isJob(it.d)){
       const mc=machById(it.d.machineId), nm=mc?esc(mc.name):'stroj';
       if(it.d.type==='job_start') return row(it.ts,`<span class="tchip job">Start tisku</span>`,
-        `<b>${nm}</b> · ${fmtInt(it.d.totalLayers)} vrstev · ${it.d.layerHeight} µm · ${it.d.grooves} drážek`,who);
+        `<b>${nm}</b> · ${fmtInt(it.d.totalLayers)} vrstev · ${it.d.layerHeight} µm · dávkování ${it.d.grooves}`,who);
       if(it.d.type==='job_change') return row(it.ts,`<span class="tchip job">Změna drážek</span>`,
-        `<b>${nm}</b> · od vrstvy ${fmtInt(it.d.layer)}: ${it.d.from} → ${it.d.to} drážek`,who,
+        `<b>${nm}</b> · od vrstvy ${fmtInt(it.d.layer)}: dávkování ${it.d.from} → ${it.d.to}`,who,
         `~${fmtG(it.d.consumed)}`,'est');
       return row(it.ts,`<span class="tchip job">Konec tisku${it.d.auto?' (odpočet)':''}</span>`,
         `<b>${nm}</b> · vrstva ${fmtInt(it.d.layer)} · spotřeba odhadem`,who,`~${fmtG(it.d.consumed)}`,'est');
@@ -831,8 +841,9 @@ function vNastaveni(){
     cfgHTML+=`<div class="cfg-group"><div class="gh"><span class="sw" style="background:${mat.color}"></span>${esc(mc.name)} · ${esc(mat.name)}</div>
       ${cs.map(c=>`<div class="cfg-row">
         <div><span class="lbl">výška</span><span class="k">${c.layerHeight} µm</span></div>
-        <div><span class="lbl">drážky</span><span class="k">${c.grooves}</span></div>
+        <div><span class="lbl">dávkování</span><span class="k">${c.grooves}</span></div>
         <div><span class="lbl">na drážku</span><span class="v">${fmtG(c.massPerGroove)} g</span></div>
+        <div><span class="lbl">na vrstvu</span><span class="v">${fmtG(layerMass(c))} g</span></div>
         <div><span class="lbl">plnění přepadu</span><span class="v">${fmtG(c.fillRate)} g/h</span></div>
         <div><button class="mini-btn" onclick="edConfig('${c.id}')">Upravit</button>
              <button class="mini-btn danger" onclick="delConfig('${c.id}')">×</button></div></div>`).join('')}</div>`;
@@ -841,7 +852,7 @@ function vNastaveni(){
   const P_=(i,t,body)=>`<div class="panel"><h3><span class="ph-ico">${ico(i,16)}</span>${t}</h3><div class="panel-body">${body}</div></div>`;
   return `<div class="viewhead"><h2>Nastavení</h2></div>
   ${P_('stroj','Stroje',machs+`<div style="margin-top:14px"><button class="btn secondary" onclick="edMachine()">+ Přidat stroj</button></div>`)}
-  ${P_('cfg','Konfigurace tisku',`<p class="tnote" style="margin:0 0 12px">Jedinečná kombinace stroj + materiál + výška vrstvy + počet drážek. Určuje hmotnost na jednu drážku a rychlost plnění přepadů. Výchozí řádky jsou jen ukázkové — přepište je svými hodnotami.</p>`
+  ${P_('cfg','Konfigurace tisku',`<p class="tnote" style="margin:0 0 12px">Jedinečná kombinace stroj + materiál + výška vrstvy + dávkování. Dávkování je počet drážek na <b>dvě</b> vrstvy, proto je hmotnost na vrstvu poloviční — dopočtená je vpravo. Výchozí řádky jsou jen ukázkové — přepište je svými hodnotami.</p>`
     +cfgHTML+`<div style="margin-top:14px"><button class="btn secondary" onclick="edConfig()">+ Přidat konfiguraci</button></div>`)}
   ${P_('prijem','Materiály',mats+`<div style="margin-top:14px"><button class="btn secondary" onclick="edMaterial()">+ Přidat materiál</button></div>`)}
   ${P_('naplneni','Kontejnery',`<p class="tnote" style="margin:0 0 12px">Sady kontejnerů jsou dedikované materiálu — AlSi10Mg č. 1 je jiná nádoba než 316L č. 1.</p>`+conts)}
@@ -1046,14 +1057,14 @@ function opStart(machineId){
   };
   const refreshGr=()=>{ const mc=machById(q('#fMach').value), h=parseNum(q('#fHeight').value);
     const gs=groovesFor(mc.id,mc.materialId,h);
-    q('#grw').innerHTML=fld('Počáteční počet drážek / vrstvu',
+    q('#grw').innerHTML=fld('Počáteční dávkování',
       `<select class="inp" id="fGr">${gs.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>`);
     q('#fGr').onchange=upd; upd(); };
   const upd=()=>{ const cv=q('#cv'); const mc=machById(q('#fMach').value);
     const hS=q('#fHeight'), gS=q('#fGr'), lay=Math.round(parseNum(q('#fL').value));
     if(!hS||!gS||!lay||lay<=0){ cv.textContent='—'; return; }
     const cfg=findConfig(mc.id,mc.materialId,parseNum(hS.value),parseNum(gS.value));
-    cv.textContent=cfg?'~'+fmtG(lay*cfg.grooves*cfg.massPerGroove)+' g':'—'; };
+    cv.textContent=cfg?'~'+fmtG(lay*layerMass(cfg))+' g':'—'; };
   q('#fMach').onchange=refresh; q('#fL').addEventListener('input',upd); refresh();
 }
 
@@ -1061,7 +1072,7 @@ function opDrazky(machineId){
   const jobs=state.jobs.filter(j=>j.status==='running');
   if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
   const mid=pickMach(machineId,jobs.map(j=>machById(j.machineId)));
-  openModal('drazky','Změna počtu drážek',
+  openModal('drazky','Změna dávkování',
     fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
     fld('Vrstva, ve které změna proběhla',numInput('fLayer',null,'číslo vrstvy'))+
     `<div id="grw"></div>`+
@@ -1077,7 +1088,7 @@ function opDrazky(machineId){
       const gS=q('#fGr'); if(!gS||gS.disabled){mErr('Není dostupná jiná konfigurace.');return false;}
       const cfg=findConfig(mc.id,j.materialId,j.layerHeight,parseNum(gS.value));
       if(!cfg){mErr('Konfigurace nenalezena.');return false;}
-      if(cfg.grooves===s.grooves){mErr('Zvolte jiný počet drážek.');return false;}
+      if(cfg.grooves===s.grooves){mErr('Zvolte jiné dávkování.');return false;}
       pushUndo(`Změna drážek na ${mc.name} (${s.grooves} → ${cfg.grooves})`);
       const ts=now(), before=s.grooves;
       s.endLayer=layer; s.endTs=ts;
@@ -1085,15 +1096,15 @@ function opDrazky(machineId){
         startLayer:layer,startTs:ts,endLayer:null,endTs:null});
       addEvent({type:'job_change',ts,machineId:mc.id,jobId:j.id,layer,from:before,to:cfg.grooves,
         consumed:jobConsumedTotal(j),operatorId:op});
-      save(); toast(`Drážky ${before} → ${cfg.grooves} od vrstvy ${fmtInt(layer)}`);
+      save(); toast(`Dávkování ${before} → ${cfg.grooves} od vrstvy ${fmtInt(layer)}`);
     },'Uložit změnu','est');
   const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
     const s=lastSeg(j), cl=Math.round(currentLayer(j));
-    q('#mi').innerHTML=`<div class="modal-info est">Aktuálně <b>${s.grooves}</b> drážek · odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · výška ${j.layerHeight} µm</div>`;
+    q('#mi').innerHTML=`<div class="modal-info est">Aktuálně dávkování <b>${s.grooves}</b> · odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · výška ${j.layerHeight} µm</div>`;
     const li=q('#fLayer'); if(!li.value) li.value=cl;
     const gs=groovesFor(mc.id,j.materialId,j.layerHeight).filter(g=>g!==s.grooves);
     q('#grw').innerHTML=gs.length
-      ? fld('Nový počet drážek / vrstvu',`<select class="inp" id="fGr">${gs.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>`)
+      ? fld('Nové dávkování',`<select class="inp" id="fGr">${gs.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>`)
       : `<div class="modal-info danger">Pro tuto výšku vrstvy není jiná konfigurace. Přidejte ji v Nastavení.</div>`;
     upd(); };
   const upd=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
@@ -1101,7 +1112,7 @@ function opDrazky(machineId){
     let done=0; for(const sg of j.segments) if(sg!==s) done+=segConsumed(j,sg,sg.startTs,segEndTs(j,sg));
     const cv=q('#cv');
     if(isNaN(layer)||layer<s.startLayer){cv.textContent='—';return;}
-    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*s.grooves*s.massPerGroove)+' g'; };
+    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*layerMass(s))+' g'; };
   q('#fMach').onchange=refresh; q('#fLayer').addEventListener('input',upd); refresh();
 }
 
@@ -1135,7 +1146,7 @@ function opStop(machineId){
     const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value)), cv=q('#cv');
     if(isNaN(layer)||layer<s.startLayer){cv.textContent='—';return;}
     let done=0; for(const sg of j.segments) if(sg!==s) done+=segConsumed(j,sg,sg.startTs,segEndTs(j,sg));
-    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*s.grooves*s.massPerGroove)+' g'; };
+    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*layerMass(s))+' g'; };
   q('#fMach').onchange=refresh; q('#fLayer').addEventListener('input',upd); refresh();
 }
 
@@ -1377,7 +1388,7 @@ function edConfig(id){
   const c=id?cfgById(id):null;
   openModal('cfg',id?'Upravit konfiguraci':'Nová konfigurace',
     `<div class="fld-row">${fld('Stroj',machSelect('fMach',null,pickMach(c?c.machineId:null,state.machines)))}${fld('Materiál',matSelect('fMat',null,pickMat(c?c.materialId:null,state.materials)))}</div>`+
-    `<div class="fld-row">${fld('Výška vrstvy (µm)',numInput('fH',c?c.layerHeight:'','30'))}${fld('Drážky / vrstvu',numInput('fGr',c?c.grooves:'','40'))}</div>`+
+    `<div class="fld-row">${fld('Výška vrstvy (µm)',numInput('fH',c?c.layerHeight:'','30'))}${fld('Dávkování (drážek na 2 vrstvy)',numInput('fGr',c?c.grooves:'','40'))}</div>`+
     `<div class="fld-row">${fld('Hmotnost na drážku (g)',decInput('fMg',c?String(c.massPerGroove).replace('.',','):'','1,2'))}
       ${fld('Rychlost plnění přepadu (g/h)',decInput('fFr',c?String(c.fillRate).replace('.',','):'','180'))}</div>`,
     ()=>{ const mid=q('#fMach').value, mat=q('#fMat').value;
