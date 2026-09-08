@@ -212,6 +212,32 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .mini-btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:6px 11px; font-size:.82rem;
   font-weight:600; cursor:pointer; color:var(--ink-soft)}
 .mini-btn.danger{color:var(--danger); border-color:var(--danger-soft)}
+.kal{background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--c);
+  border-radius:var(--r); box-shadow:var(--shadow); margin-bottom:16px; overflow:hidden}
+.kal-head{display:flex; align-items:center; gap:10px; padding:14px 17px; flex-wrap:wrap}
+.kal-head .dot{width:12px; height:12px; border-radius:50%; background:var(--c)}
+.kal-head .nm{font-size:1.04rem; font-weight:700}
+.kal-sec{border-top:1px solid var(--line); padding:13px 17px}
+.kal-sec h4{margin:0 0 10px; font-size:.68rem; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint)}
+.kal-rows{display:grid; grid-template-columns:1fr auto; gap:5px 14px; font-size:.88rem}
+.kal-rows .k{color:var(--ink-soft)}
+.kal-rows .v{font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right}
+.kal-rows .sep{grid-column:1/-1; height:1px; background:var(--line); margin:6px 0}
+.kal-rows .hi{font-weight:700}
+.kal-rows .est{color:var(--est); font-weight:650}
+.kal-rows .neg{color:var(--danger)}
+.kal-cta{margin-top:12px; display:flex; gap:8px; flex-wrap:wrap}
+.kal-cta button{flex:1 1 auto; min-width:150px; border:1px solid var(--est); background:var(--est); color:#fff;
+  border-radius:10px; padding:11px 14px; font-size:.88rem; font-weight:650; cursor:pointer}
+.kal-cta button.ghost{background:var(--surface); color:var(--ink); border-color:var(--line-strong)}
+.kal-cta button:disabled{opacity:.4; cursor:default}
+.kal-pts{margin-top:10px; font-size:.8rem; color:var(--ink-faint); line-height:1.6}
+.kal-pts b{font-family:var(--mono); color:var(--ink-soft); font-weight:650}
+.kal-cfg{display:grid; grid-template-columns:1fr auto auto auto; gap:8px 12px; align-items:center;
+  font-size:.86rem; padding:8px 0; border-top:1px solid var(--line)}
+.kal-cfg:first-of-type{border-top:0}
+.kal-cfg .v{font-family:var(--mono); font-variant-numeric:tabular-nums}
+.kal-cfg .lbl{font-size:.66rem; color:var(--ink-faint); display:block}
 .cfg-group{margin-bottom:6px}
 .cfg-group .gh{font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint);
   padding:9px 0 4px; display:flex; align-items:center; gap:8px}
@@ -337,6 +363,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
   .trow .cbatch{grid-column:2/4} .trow .cmass{grid-row:1; grid-column:3}
   .trow .cdry,.trow .cstate{grid-column:2/4}
   .log-row{grid-template-columns:1fr auto} .log-when{grid-column:1/-1; order:-1}
+  .kal-cfg{grid-template-columns:1fr auto; gap:6px 10px}
   .cfg-row{grid-template-columns:1fr 1fr auto; gap:8px 10px}
   .cfg-row>div:nth-child(5){grid-column:1/3}
   .brand p{display:none}
@@ -357,6 +384,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
     <button data-view="prehled" aria-current="true">Přehled</button>
     <button data-view="sklad">Sklad</button>
     <button data-view="operace">Operace</button>
+    <button data-view="kalibrace">Kalibrace</button>
     <button data-view="historie">Historie</button>
     <button data-view="nastaveni">Nastavení</button>
   </nav>
@@ -365,7 +393,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.7 · sklad + odhady tisku</span><span class="sep"></span>
+  <span>v3.8 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -439,7 +467,7 @@ const MAT_COLORS=['#3b6ea5','#b5651d','#4a7c59','#7d5ba6','#b03a5b','#2b8a8a','#
 
 function defaultState(){
   const a=uid(), b=uid(), op=uid(), m1=uid(), m2=uid();
-  return { version:4,
+  return { version:5,
     materials:[{id:a,name:'AlSi10Mg',color:'#3b6ea5',density:2.67},{id:b,name:'316L',color:'#b5651d',density:7.99}],
     machines:[{id:m1,name:'Stroj 1',materialId:null},{id:m2,name:'Stroj 2',materialId:null}],
     operators:[{id:op,name:'Obsluha 1'}],
@@ -448,7 +476,7 @@ function defaultState(){
       {id:uid(),machineId:m1,materialId:a,layerHeight:30,grooves:60,massPerGroove:1.2,fillRate:240},
       {id:uid(),machineId:m1,materialId:a,layerHeight:60,grooves:60,massPerGroove:1.2,fillRate:300}
     ],
-    jobs:[], batches:[], containers:[], movements:[], events:[], voids:[], undo:[],
+    jobs:[], batches:[], containers:[], movements:[], events:[], voids:[], undo:[], calibrations:[],
     ui:{lastMachineId:null,lastMaterialId:null},
     settings:{dryingWarnDays:14}, currentOperatorId:op };
 }
@@ -470,11 +498,13 @@ function migrate(s){
   if(s.version<3){ s.configs=s.configs||[]; s.jobs=s.jobs||[]; s.version=3; }
   s.configs=s.configs||[]; s.jobs=s.jobs||[];
   s.ui=s.ui||{lastMachineId:null,lastMaterialId:null};
+  s.calibrations=s.calibrations||[];
   if(s.version<4){          // dávkování je na 2 vrstvy — dřívější odhady byly dvojnásobné
     s.events.forEach(e=>{ if(['job_change','job_stop'].includes(e.type)&&typeof e.consumed==='number')
       e.consumed=Math.round(e.consumed/2*10)/10; });
     s.version=4;
   }
+  if(s.version<5){ s.version=5; }
   return s;
 }
 const matById=id=>state.materials.find(m=>m.id===id);
@@ -549,19 +579,25 @@ function lastTankAnchor(mid){
   for(const m of state.movements){ if(m.machineId!==mid)continue;
     if(m.type==='zmena_materialu'&&m.ts>=t){ t=m.ts; base=0; }
     else if(m.type==='korekce'&&m.ts>=t){ t=m.ts; base=m.meas!=null?m.meas:0; } }
+  /* kalibrace dávkovače je také kotva — nastaví odhad na skutečně zvážený zůstatek,
+     takže se chyba nepřenáší do další série a každé okno dá čistý údaj */
+  for(const c of state.calibrations){ if(c.machineId!==mid||c.kind!=='doser')continue;
+    if(c.ts>=t){ t=c.ts; base=c.residual||0; } }
   return {ts:t,base};
 }
-function tankEst(mid){
+/* tankRaw může být i záporný — kalibrace potřebuje znaménko,
+   zobrazení používá tankEst, který ořezává na nulu */
+function tankRaw(mid){
   const {ts,base}=lastTankAnchor(mid); let g=base;
   for(const m of state.movements){ if(m.machineId!==mid||m.ts<ts)continue;
     if(m.type==='naplneni'||(m.type==='preseti'&&m.to===MACH(mid))) g+=m.amount;
     else if(m.type==='vyprazdneni') g-=m.amount; }
   g-=consumedIn(mid,ts,now());
   /* Žádná horní mez podle hmotnosti ve stroji! Odebrání přepadů tuhle hmotnost snižuje,
-     ale zásobníku se netýká — prášek v přepadech ze zásobníku odešel už při dávkování.
-     Dřívější ořez tak strhával odhad zásobníku dolů spolu s každým odběrem přepadů. */
-  return Math.max(0,r1(g));
+     ale zásobníku se netýká — prášek v přepadech ze zásobníku odešel už při dávkování. */
+  return r1(g);
 }
+const tankEst=mid=>Math.max(0,tankRaw(mid));
 function ovfEst(mid){
   const t0=lastOvfReset(mid), t1=now(); let g=0;
   for(const j of state.jobs){ if(j.machineId!==mid)continue;
@@ -583,15 +619,55 @@ function tickJobs(){ let ch=false;
 }
 function jobConsumedTotal(j){ let g=0; for(const s of j.segments) g+=segConsumed(j,s,s.startTs,segEndTs(j,s)); return r1(g); }
 
+/* ===================== KALIBRACE =====================
+   Dávkovač: v okně od poslední kotvy se sečte navážené, vyvezené a počet skutečně
+   vydaných drážek. Když je zásobník fyzicky prázdný, platí
+       skutečně vydáno = navážené − vyvezené − zůstatek
+   a hmotnost drážky vyjde absolutně, tedy nezávisle na hodnotě právě v konfiguraci
+   (korekční faktor by se při opakovaném zapisování násobil sám do sebe).
+   Protože se okno počítá v drážkách, nevadí, když se v něm použilo víc dávkování. */
+function doserWindow(mid){
+  const {ts}=lastTankAnchor(mid);
+  let filled=0, emptied=0;
+  for(const m of state.movements){ if(m.machineId!==mid||m.ts<ts)continue;
+    if(m.type==='naplneni'||(m.type==='preseti'&&m.to===MACH(mid))) filled+=m.amount;
+    else if(m.type==='vyprazdneni') emptied+=m.amount; }
+  let grooves=0, layers=0;
+  for(const j of state.jobs){ if(j.machineId!==mid)continue;
+    for(const sg of j.segments){
+      const a=Math.max(ts,sg.startTs), b=segEndTs(j,sg); if(b<=a)continue;
+      const L=Math.max(0,layerInSeg(j,sg,b)-layerInSeg(j,sg,a));
+      layers+=L; grooves+=L*sg.grooves/DAVKA_VRSTEV; } }
+  return { ts, filled:r1(filled), emptied:r1(emptied), grooves,
+           layers:Math.round(layers), estimated:r1(consumedIn(mid,ts,now())), residual:tankRaw(mid) };
+}
+/* dlouhodobý průměr jako podíl součtů — velké série váží víc než malé */
+function doserAvg(mid,matId,extra){
+  const pts=state.calibrations.filter(c=>c.kind==='doser'&&c.machineId===mid&&c.materialId===matId);
+  const all=extra?pts.concat([extra]):pts;
+  let d=0,g=0; for(const c of all){ d+=c.dispensed; g+=c.grooves; }
+  return { n:all.length, dispensed:r1(d), grooves:g, avg:g>0?d/g:null, points:pts };
+}
+function ovfAvg(configId,extra){
+  const pts=state.calibrations.filter(c=>c.kind==='overflow'&&c.configId===configId);
+  const all=extra?pts.concat([extra]):pts;
+  let m=0,h=0; for(const c of all){ m+=c.mass; h+=c.ms/3600000; }
+  return { n:all.length, mass:r1(m), hours:h, avg:h>0?m/h:null, points:pts };
+}
+const fmt3=x=>x==null?'—':(Math.round(x*1000)/1000).toFixed(3).replace('.',',');
+const fmt1=x=>x==null?'—':(Math.round(x*10)/10).toFixed(1).replace('.',',');
+
 /* ===================== undo ===================== */
 function pushUndo(label){
   state.undo.push({label,ts:now(),snap:JSON.stringify({movements:state.movements,events:state.events,
-    containers:state.containers,batches:state.batches,machines:state.machines,jobs:state.jobs})});
+    containers:state.containers,batches:state.batches,machines:state.machines,jobs:state.jobs,
+    configs:state.configs,calibrations:state.calibrations})});
   while(state.undo.length>30) state.undo.shift();
 }
 function undoLast(){ const u=state.undo.pop(); if(!u)return; const s=JSON.parse(u.snap);
   state.movements=s.movements; state.events=s.events; state.containers=s.containers;
   state.batches=s.batches; state.machines=s.machines; state.jobs=s.jobs||[];
+  if(s.configs) state.configs=s.configs; if(s.calibrations) state.calibrations=s.calibrations;
   state.voids.push({id:uid(),ts:now(),operatorId:state.currentOperatorId,label:u.label});
   save(); toast('Anulováno: '+u.label); }
 function addMovement(mv){ mv.id=uid(); mv.ts=mv.ts||now(); mv.amount=r1(mv.amount); state.movements.push(mv); }
@@ -656,6 +732,7 @@ function render(){
   if(view==='prehled')m.innerHTML=vPrehled();
   else if(view==='sklad')m.innerHTML=vSklad();
   else if(view==='operace')m.innerHTML=vOperace();
+  else if(view==='kalibrace')m.innerHTML=vKalibrace();
   else if(view==='historie'){m.innerHTML=vHistorie(); qa('.filters button').forEach(b=>b.onclick=()=>{histFilter=b.dataset.f;render();});}
   else if(view==='nastaveni')m.innerHTML=vNastaveni();
   q('#storeMode').textContent=Store.mode();
@@ -768,11 +845,58 @@ function vOperace(){
   </div>`;
 }
 
+function vKalibrace(){
+  const live=state.machines.filter(m=>m.materialId);
+  if(!live.length) return `<div class="viewhead"><h2>Kalibrace</h2></div>`+
+    emptyBox('Žádný stroj s nasazeným materiálem','Kalibrovat lze až stroj, ve kterém je nasazený materiál.','Přejít na Přehled',"go('prehled')");
+  const blocks=live.map(mc=>{
+    const mat=matById(mc.materialId), w=doserWindow(mc.id);
+    const fresh=w.grooves>0?{dispensed:r1(w.filled-w.emptied),grooves:w.grooves}:null;
+    const cur=state.configs.filter(c=>c.machineId===mc.id&&c.materialId===mat.id);
+    const curVal=cur.length?cur[0].massPerGroove:null;
+    const avgNow=doserAvg(mc.id,mat.id);
+    const avgNew=fresh?doserAvg(mc.id,mat.id,fresh):avgNow;
+    const ptsTxt=avgNow.points.length
+      ? avgNow.points.slice(-5).reverse().map(c=>`${fmtDate(c.ts)} <b>${fmt3(c.dispensed/c.grooves)}</b>`).join(' · ')
+      : 'zatím žádné body';
+    const cfgRows=cur.sort((a,b)=>a.layerHeight-b.layerHeight||a.grooves-b.grooves).map(c=>{
+      const a=ovfAvg(c.id);
+      return `<div class="kal-cfg">
+        <div><span class="lbl">konfigurace</span>${c.layerHeight} µm · dávkování ${c.grooves}</div>
+        <div><span class="lbl">v systému</span><span class="v">${fmt1(c.fillRate)} g/h</span></div>
+        <div><span class="lbl">průměr (${a.n})</span><span class="v ${a.avg!=null?'est':''}">${a.avg!=null?fmt1(a.avg)+' g/h':'—'}</span></div>
+        <div><button class="mini-btn" onclick="opKalPrepady('${mc.id}','${c.id}')">+ měření</button></div></div>`;}).join('')
+      || `<div class="tnote">Pro tento stroj a materiál nejsou konfigurace.</div>`;
+    return `<div class="kal" style="--c:${mat.color}">
+      <div class="kal-head"><span class="dot"></span><span class="nm">${esc(mc.name)} · ${esc(mat.name)}</span></div>
+      <div class="kal-sec"><h4>Dávkovač — hmotnost jedné drážky</h4>
+        <div class="kal-rows">
+          <div class="k">Okno od</div><div class="v">${w.ts?fmtDate(w.ts)+' '+fmtTime(w.ts):'začátku evidence'}</div>
+          <div class="k">Naváženo do zásobníku</div><div class="v">${fmtG(w.filled)} g</div>
+          <div class="k">Vyvezeno bypassem</div><div class="v">${fmtG(w.emptied)} g</div>
+          <div class="k">Vydáno drážek (z ${fmtInt(w.layers)} vrstev)</div><div class="v">${fmtInt(w.grooves)}</div>
+          <div class="k">Odhad spotřeby</div><div class="v">${fmtG(w.estimated)} g</div>
+          <div class="k hi">Virtuální zůstatek</div><div class="v hi ${w.residual<0?'neg':'est'}">${w.residual>0?'+':''}${fmtG(w.residual)} g</div>
+          <div class="sep"></div>
+          <div class="k">V konfiguracích</div><div class="v">${curVal!=null?fmt3(curVal)+' g':'—'}</div>
+          <div class="k">Z tohoto okna</div><div class="v est">${fresh?fmt3(fresh.dispensed/fresh.grooves)+' g':'—'}</div>
+          <div class="k hi">Průměr po zapsání (${avgNew.n} bodů)</div><div class="v hi est">${avgNew.avg!=null?fmt3(avgNew.avg)+' g':'—'}</div>
+        </div>
+        <div class="kal-cta">
+          <button onclick="opKalDavkovac('${mc.id}')" ${w.grooves>0?'':'disabled'}>Zkalibrovat dávkovač</button>
+        </div>
+        <div class="kal-pts">Body: ${ptsTxt}</div>
+      </div>
+      <div class="kal-sec"><h4>Plnění přepadů — podle konfigurace</h4>${cfgRows}</div>
+    </div>`;}).join('');
+  return `<div class="viewhead"><h2>Kalibrace</h2><span class="sub">Odvozeno z vážených pohybů. Dávkovač se kalibruje při prázdném zásobníku.</span></div>${blocks}`;
+}
+
 function vHistorie(){
   const items=[...state.movements.map(m=>({k:'mv',ts:m.ts,d:m})),
                ...state.events.map(e=>({k:'ev',ts:e.ts,d:e})),
                ...state.voids.map(v=>({k:'vd',ts:v.ts,d:v}))].sort((a,b)=>b.ts-a.ts);
-  const isJob=e=>['job_start','job_change','job_stop'].includes(e.type);
+  const isJob=e=>['job_start','job_change','job_stop','cal_doser','cal_overflow'].includes(e.type);
   const f=items.filter(it=>{
     if(histFilter==='all')return true;
     if(histFilter==='print')return it.k==='ev'&&isJob(it.d);
@@ -781,7 +905,7 @@ function vHistorie(){
     if(histFilter==='sklad')return (it.k==='mv'&&['prijem','preseti'].includes(it.d.type))||(it.k==='ev'&&it.d.type==='drying');
     return true; });
   const fb=(k,l)=>`<button data-f="${k}" aria-pressed="${histFilter===k}">${l}</button>`;
-  const bar=`<div class="filters">${fb('all','Vše')}${fb('sklad','Sklad & recyklace')}${fb('machine','Stroje')}${fb('print','Tisk')}${fb('loss','Odpad & ztráty')}</div>`;
+  const bar=`<div class="filters">${fb('all','Vše')}${fb('sklad','Sklad & recyklace')}${fb('machine','Stroje')}${fb('print','Tisk a kalibrace')}${fb('loss','Odpad & ztráty')}</div>`;
   if(!f.length) return `<div class="viewhead"><h2>Historie</h2></div>${bar}`+
     emptyBox('Zatím žádné záznamy','Po první operaci se tu objeví úplný auditní záznam.','Přejít na Operace',"go('operace')");
   const rows=f.slice(0,400).map(it=>{
@@ -797,6 +921,11 @@ function vHistorie(){
       if(it.d.type==='job_change') return row(it.ts,`<span class="tchip job">Změna drážek</span>`,
         `<b>${nm}</b> · od vrstvy ${fmtInt(it.d.layer)}: dávkování ${it.d.from} → ${it.d.to}`,who,
         `~${fmtG(it.d.consumed)}`,'est');
+      if(it.d.type==='cal_doser') return row(it.ts,`<span class="tchip job">Kalibrace dávkovače</span>`,
+        `<b>${nm}</b> · z ${fmtInt(it.d.grooves)} drážek: ${fmt3(it.d.single)} g → průměr <b>${fmt3(it.d.value)} g</b> (${it.d.n} bodů)`,who);
+      if(it.d.type==='cal_overflow'){ const c=cfgById(it.d.configId);
+        return row(it.ts,`<span class="tchip job">Kalibrace přepadů</span>`,
+          `<b>${nm}</b>${c?' · '+c.layerHeight+' µm · dávkování '+c.grooves:''} · ${fmt1(it.d.single)} g/h → průměr <b>${fmt1(it.d.value)} g/h</b> (${it.d.n})`,who); }
       return row(it.ts,`<span class="tchip job">Konec tisku${it.d.auto?' (odpočet)':''}</span>`,
         `<b>${nm}</b> · vrstva ${fmtInt(it.d.layer)} · spotřeba odhadem`,who,`~${fmtG(it.d.consumed)}`,'est');
     }
@@ -1380,6 +1509,95 @@ function opKorekce(){
   const refresh=()=>{ const mc=machById(q('#fMach').value), bb=balances();
     q('#mi').innerHTML=`<div class="modal-info"><span class="k">Eviduje se:</span> <b>${mc&&mc.materialId?esc(matById(mc.materialId).name)+' · ':''}${fmtG(mc?mMass(bb,mc.id):0)} g</b></div>`; };
   q('#fMach').onchange=refresh; refresh();
+}
+
+/* ===================== operace kalibrace ===================== */
+function opKalDavkovac(mid){
+  const mc=machById(mid); if(!mc||!mc.materialId){toast('Stroj nemá nasazený materiál.',true);return;}
+  const mat=matById(mc.materialId), w=doserWindow(mid);
+  if(w.grooves<=0){toast('V okně není žádný zapsaný tisk — není z čeho kalibrovat.',true);return;}
+  const cur=state.configs.filter(c=>c.machineId===mid&&c.materialId===mat.id);
+  openModal('cfg','Kalibrace dávkovače',
+    `<div class="modal-info est">Zásobník musí být v tuhle chvíli <b>fyzicky prázdný</b>. Rozdíl proti virtuálnímu
+      zůstatku <b>${w.residual>0?'+':''}${fmtG(w.residual)} g</b> se použije jako kalibrační bod.</div>`+
+    `<div class="modal-info"><span class="k">Stroj:</span> <b>${esc(mc.name)} · ${esc(mat.name)}</b><br>
+      <span class="k">Naváženo</span> <b>${fmtG(w.filled)} g</b> · <span class="k">vyvezeno</span> <b>${fmtG(w.emptied)} g</b><br>
+      <span class="k">Vydáno</span> <b>${fmtInt(w.grooves)}</b> <span class="k">drážek z</span> <b>${fmtInt(w.layers)}</b> <span class="k">vrstev</span></div>`+
+    fld('Skutečný zůstatek v zásobníku',gInput('fZ','0'),'Po kompletním vyprázdnění 0 g. Jinak zvážený zbytek.')+
+    `<div class="computed est"><span class="k">Hmotnost drážky z tohoto okna</span><span class="v" id="cv">—</span></div>`+
+    `<div class="computed"><span class="k">Zapíše se do konfigurací (průměr)</span><span class="v" id="av">—</span></div>`+
+    opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const raw=q('#fZ').value.trim(), Z=raw===''?0:parseG(raw);
+      if(isNaN(Z)||Z<0){mErr('Zadejte zůstatek 0 nebo více.');return false;}
+      const dispensed=r1(w.filled-w.emptied-Z);
+      if(dispensed<=0){mErr('Vydané množství vychází nula nebo méně — zkontrolujte zápisy navážení a vyprázdnění.');return false;}
+      pushUndo(`Kalibrace dávkovače ${mc.name}`);
+      const pt={id:uid(),ts:now(),kind:'doser',machineId:mid,materialId:mat.id,filled:w.filled,emptied:w.emptied,
+        grooves:w.grooves,layers:w.layers,residual:Z,dispensed,operatorId:op};
+      state.calibrations.push(pt);
+      const a=doserAvg(mid,mat.id);                     // nový bod je už v seznamu
+      const val=Math.round(a.avg*1000)/1000;
+      cur.forEach(c=>{ c.massPerGroove=val; });
+      addEvent({type:'cal_doser',machineId:mid,materialId:mat.id,value:val,
+        single:Math.round(dispensed/w.grooves*1000)/1000,grooves:w.grooves,n:a.n,operatorId:op});
+      save(); toast(`Hmotnost drážky ${fmt3(val)} g zapsána do ${cur.length} konfigurací`);
+    },'Zkalibrovat','est');
+  const upd=()=>{ const raw=q('#fZ').value.trim(), Z=raw===''?0:parseG(raw);
+    const d=isNaN(Z)?NaN:r1(w.filled-w.emptied-Z);
+    const single=(!isNaN(d)&&d>0)?d/w.grooves:null;
+    q('#cv').textContent=single!=null?fmt3(single)+' g':'—';
+    const a=single!=null?doserAvg(mid,mat.id,{dispensed:d,grooves:w.grooves}):null;
+    q('#av').textContent=a&&a.avg!=null?fmt3(a.avg)+' g  ('+a.n+' bodů)':'—'; };
+  q('#fZ').addEventListener('input',upd); upd();
+}
+
+function opKalPrepady(mid,configId){
+  const mc=machById(mid); if(!mc||!mc.materialId){toast('Stroj nemá nasazený materiál.',true);return;}
+  const mat=matById(mc.materialId);
+  const cur=state.configs.filter(c=>c.machineId===mid&&c.materialId===mat.id)
+    .sort((a,b)=>a.layerHeight-b.layerHeight||a.grooves-b.grooves);
+  if(!cur.length){toast('Pro tento stroj a materiál nejsou konfigurace.',true);return;}
+  const sel=configId&&cur.some(c=>c.id===configId)?configId:cur[0].id;
+  openModal('prepady','Kalibrace plnění přepadů',
+    `<div class="modal-info est">Zadejte, kolik prášku se v přepadech nasbíralo a za jak dlouho. Měřte jen běžící
+      tisk — vymetání hotového buildu by rychlost nesmyslně nadhodnotilo.</div>`+
+    fld('Konfigurace',`<select class="inp" id="fCfg">${cur.map(c=>
+      `<option value="${c.id}" ${c.id===sel?'selected':''}>${c.layerHeight} µm · dávkování ${c.grooves}</option>`).join('')}</select>`)+
+    fld('Nasbíraná hmotnost',gInput('fM'))+
+    fld('Za dobu',`<div class="dhm">
+      <span class="u"><input id="fD" type="text" inputmode="numeric" value="0"><span>dd</span></span>
+      <span class="u"><input id="fH" type="text" inputmode="numeric" value="0"><span>hh</span></span>
+      <span class="u"><input id="fMi" type="text" inputmode="numeric" value="0"><span>mm</span></span></div>`)+
+    `<div class="computed est"><span class="k">Rychlost z tohoto měření</span><span class="v" id="cv">—</span></div>`+
+    `<div class="computed"><span class="k">Zapíše se do konfigurace (průměr)</span><span class="v" id="av">—</span></div>`+
+    opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const cfg=cfgById(q('#fCfg').value); if(!cfg){mErr('Vyberte konfiguraci.');return false;}
+      const m=parseG(q('#fM').value); if(isNaN(m)||m<=0){mErr('Zadejte hmotnost větší než 0.');return false;}
+      const ms=((( parseNum(q('#fD').value)||0)*24+(parseNum(q('#fH').value)||0))*60+(parseNum(q('#fMi').value)||0))*60000;
+      if(ms<=0){mErr('Zadejte dobu plnění.');return false;}
+      pushUndo(`Kalibrace přepadů ${mc.name}`);
+      state.calibrations.push({id:uid(),ts:now(),kind:'overflow',machineId:mid,materialId:mat.id,
+        configId:cfg.id,mass:m,ms,operatorId:op});
+      const a=ovfAvg(cfg.id);
+      const val=Math.round(a.avg*10)/10;
+      cfg.fillRate=val;
+      addEvent({type:'cal_overflow',machineId:mid,materialId:mat.id,configId:cfg.id,value:val,
+        single:Math.round(m/(ms/3600000)*10)/10,n:a.n,operatorId:op});
+      save(); toast(`Rychlost plnění ${fmt1(val)} g/h zapsána`);
+    },'Uložit měření','est');
+  const upd=()=>{ const m=parseG(q('#fM').value);
+    const ms=((( parseNum(q('#fD').value)||0)*24+(parseNum(q('#fH').value)||0))*60+(parseNum(q('#fMi').value)||0))*60000;
+    const rate=(!isNaN(m)&&m>0&&ms>0)?m/(ms/3600000):null;
+    q('#cv').textContent=rate!=null?fmt1(rate)+' g/h':'—';
+    const cfg=cfgById(q('#fCfg').value);
+    const a=(rate!=null&&cfg)?ovfAvg(cfg.id,{mass:m,ms}):null;
+    q('#av').textContent=a&&a.avg!=null?fmt1(a.avg)+' g/h  ('+a.n+' měření)':'—'; };
+  ['fM','fD','fH','fMi'].forEach(id=>q('#'+id).addEventListener('input',upd));
+  q('#fCfg').onchange=upd; upd();
 }
 
 /* ===================== Nastavení ===================== */
