@@ -393,7 +393,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.8 · sklad, odhady, kalibrace</span><span class="sep"></span>
+  <span>v3.9 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -884,6 +884,7 @@ function vKalibrace(){
         </div>
         <div class="kal-cta">
           <button onclick="opKalDavkovac('${mc.id}')" ${w.grooves>0?'':'disabled'}>Zkalibrovat dávkovač</button>
+          ${runningJob(mc.id)?`<span class="tnote" style="flex:1 0 100%">Na stroji běží tisk — kalibrujte až po dokončení a vyprázdnění.</span>`:''}
         </div>
         <div class="kal-pts">Body: ${ptsTxt}</div>
       </div>
@@ -1516,8 +1517,11 @@ function opKalDavkovac(mid){
   const mc=machById(mid); if(!mc||!mc.materialId){toast('Stroj nemá nasazený materiál.',true);return;}
   const mat=matById(mc.materialId), w=doserWindow(mid);
   if(w.grooves<=0){toast('V okně není žádný zapsaný tisk — není z čeho kalibrovat.',true);return;}
+  const bezi=!!runningJob(mid);   // na tomto stroji běží tisk → zásobník nelze zvážit
   const cur=state.configs.filter(c=>c.machineId===mid&&c.materialId===mat.id);
   openModal('cfg','Kalibrace dávkovače',
+    (bezi?`<div class="modal-info danger">Na tomto stroji <b>právě běží tisk</b>. Kalibrovat se má až po jeho
+      dokončení a vyprázdnění zásobníku — teď by okno obsahovalo jen část vrstev a hmotnost drážky by vyšla zkresleně.</div>`:'')+
     `<div class="modal-info est">Zásobník musí být v tuhle chvíli <b>fyzicky prázdný</b>. Rozdíl proti virtuálnímu
       zůstatku <b>${w.residual>0?'+':''}${fmtG(w.residual)} g</b> se použije jako kalibrační bod.</div>`+
     `<div class="modal-info"><span class="k">Stroj:</span> <b>${esc(mc.name)} · ${esc(mat.name)}</b><br>
@@ -1533,6 +1537,7 @@ function opKalDavkovac(mid){
       if(isNaN(Z)||Z<0){mErr('Zadejte zůstatek 0 nebo více.');return false;}
       const dispensed=r1(w.filled-w.emptied-Z);
       if(dispensed<=0){mErr('Vydané množství vychází nula nebo méně — zkontrolujte zápisy navážení a vyprázdnění.');return false;}
+      if(bezi&&!confirm(`Na ${mc.name} běží tisk.\nKalibrace by vycházela jen z části vrstev.\n\nOpravdu pokračovat?`))return false;
       pushUndo(`Kalibrace dávkovače ${mc.name}`);
       const pt={id:uid(),ts:now(),kind:'doser',machineId:mid,materialId:mat.id,filled:w.filled,emptied:w.emptied,
         grooves:w.grooves,layers:w.layers,residual:Z,dispensed,operatorId:op};
