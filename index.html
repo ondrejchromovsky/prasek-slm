@@ -108,6 +108,12 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .prog-foot .need{color:var(--est); font-weight:650}
 .prog-foot .need b{font-family:var(--mono)}
 .prog-foot .cfg{color:var(--ink-faint); font-size:.78rem}
+.layin{display:flex; gap:8px; align-items:center; margin-top:11px}
+.layin .inp{flex:1; padding:11px 13px; font-family:var(--mono); font-size:1.05rem; font-weight:600; text-align:right}
+.layin button{border:0; background:var(--est); color:#fff; border-radius:10px; padding:12px 18px;
+  font-size:.88rem; font-weight:700; cursor:pointer; white-space:nowrap}
+.layin button:hover{background:#5a4b8f}
+.prog-stale{font-size:.75rem; color:var(--warn); font-weight:600; margin-top:6px}
 .alert{margin:11px 16px 0; padding:9px 12px; border-radius:10px; font-size:.83rem; font-weight:600;
   background:var(--warn-soft); color:var(--warn)}
 .alert.bad{background:var(--danger-soft); color:var(--danger)}
@@ -393,7 +399,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.9 · sklad, odhady, kalibrace</span><span class="sep"></span>
+  <span>v3.10 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -536,28 +542,58 @@ const heightsFor=(mid,mat)=>[...new Set(configsFor(mid,mat).map(c=>c.layerHeight
 const groovesFor=(mid,mat,h)=>[...new Set(configsFor(mid,mat).filter(c=>c.layerHeight===h).map(c=>c.grooves))].sort((a,b)=>a-b);
 const findConfig=(mid,mat,h,g)=>state.configs.find(c=>c.machineId===mid&&c.materialId===mat&&c.layerHeight===h&&c.grooves===g);
 const runningJob=mid=>state.jobs.find(j=>j.machineId===mid&&j.status==='running');
-const jobEnd=j=>j.startTs+j.totalMs;
+
 const lastSeg=j=>j.segments[j.segments.length-1];
 const segEndTs=(j,s)=>s.endTs!=null?s.endTs:(j.status==='running'?now():j.endTs);
 
 /* vrstva v čase — uzavřený segment interpoluje mezi zadanými vrstvami,
    otevřený segment míří na celkový počet vrstev v zadaném čase tisku */
-function layerInSeg(j,s,ts){
-  if(s.endTs!=null){
-    if(s.endTs<=s.startTs) return s.endLayer;
-    return s.startLayer + clamp((ts-s.startTs)/(s.endTs-s.startTs),0,1)*(s.endLayer-s.startLayer);
-  }
-  const remMs=j.totalMs-(s.startTs-j.startTs), remL=j.totalLayers-s.startLayer;
-  if(remMs<=0) return j.totalLayers;
-  return clamp(s.startLayer+(ts-s.startTs)/remMs*remL, s.startLayer, j.totalLayers);
+/* --- vrstva v čase ---
+   Řídící veličinou je VRSTVA zadaná obsluhou, ne čas. Rychlost tisku není lineární
+   (závisí na ploše řezu, prodlevách, přeexponování), takže odvozovat vrstvu z času
+   se rozchází. Každé zadání vrstvy je kotva; mezi kotvami se interpoluje a za poslední
+   kotvou extrapoluje SKUTEČNOU rychlostí z posledních dvou kotev. Zadaný celkový čas
+   slouží jen jako výchozí rychlost, dokud první zadání nepřijde. */
+function jobAnchors(j){
+  const a=[{ts:j.startTs,layer:0}];
+  for(const sg of j.segments) if(sg.endTs!=null) a.push({ts:sg.endTs,layer:sg.endLayer});
+  for(const r of (j.readings||[])) a.push({ts:r.ts,layer:r.layer});
+  if(j.status!=='running'&&j.endTs!=null) a.push({ts:j.endTs,layer:j.endLayer});
+  a.sort((x,y)=>x.ts-y.ts||x.layer-y.layer);
+  const out=[]; for(const p of a){ const l=out[out.length-1];
+    if(l&&p.ts===l.ts) out[out.length-1]=p; else out.push(p); }
+  return out;
 }
-function currentLayer(j){ return j.status==='running'? layerInSeg(j,lastSeg(j),Math.min(now(),jobEnd(j))) : j.endLayer; }
-function jobProgress(j){ if(j.status!=='running')return 1; return clamp((now()-j.startTs)/j.totalMs,0,1); }
+/* vrstev za milisekundu — z posledních dvou kotev, jinak z plánovaného času */
+function jobRate(j){
+  const a=jobAnchors(j);
+  if(a.length>=2){ const p=a[a.length-2], q=a[a.length-1];
+    if(q.ts>p.ts&&q.layer>=p.layer) return (q.layer-p.layer)/(q.ts-p.ts); }
+  return j.totalMs>0 ? j.totalLayers/j.totalMs : 0;
+}
+function layerAt(j,ts){
+  const a=jobAnchors(j);
+  if(ts<=a[0].ts) return a[0].layer;
+  for(let i=1;i<a.length;i++){
+    if(ts<=a[i].ts){ const p=a[i-1], q=a[i];
+      if(q.ts<=p.ts) return q.layer;
+      return p.layer+(ts-p.ts)/(q.ts-p.ts)*(q.layer-p.layer); } }
+  const last=a[a.length-1];
+  if(j.status!=='running') return last.layer;
+  return clamp(last.layer+jobRate(j)*(ts-last.ts), last.layer, j.totalLayers);
+}
+function currentLayer(j){ return j.status==='running'? layerAt(j,now()) : j.endLayer; }
+function jobProgress(j){ if(j.status!=='running')return 1;
+  return j.totalLayers>0 ? clamp(currentLayer(j)/j.totalLayers,0,1) : 0; }
+/* předpokládaný konec z naměřené rychlosti; null, když stojí */
+function jobEta(j){ const r=jobRate(j); if(r<=0)return null;
+  return now()+(j.totalLayers-currentLayer(j))/r; }
+const lastReadingTs=j=>{ const a=jobAnchors(j); return a.length?a[a.length-1].ts:j.startTs; };
 /* „Dávkování" je počet drážek na DVĚ vrstvy — hmotnost na jednu vrstvu je tedy poloviční.
    Dělitel je schválně jen na tomhle jediném místě, aby se nedal nikde přehlédnout. */
 const DAVKA_VRSTEV=2;
 const layerMass=c=>c.grooves*c.massPerGroove/DAVKA_VRSTEV;      // g na jednu vrstvu
-const segConsumed=(j,s,a,b)=>Math.max(0,layerInSeg(j,s,b)-layerInSeg(j,s,a))*layerMass(s);
+const segConsumed=(j,s,a,b)=>Math.max(0,layerAt(j,b)-layerAt(j,a))*layerMass(s);
 
 /* spotřeba (ze zásobníku do komory) v časovém okně */
 function consumedIn(mid,t0,t1){
@@ -611,9 +647,10 @@ function needToFinish(j){ const s=lastSeg(j);
 /* automatické ukončení odpočtem */
 function tickJobs(){ let ch=false;
   for(const j of state.jobs){ if(j.status!=='running')continue;
-    if(now()>=jobEnd(j)){ const s=lastSeg(j); s.endTs=jobEnd(j); s.endLayer=j.totalLayers;
-      j.status='done'; j.endTs=jobEnd(j); j.endLayer=j.totalLayers; j.finish='auto';
-      addEvent({type:'job_stop',ts:jobEnd(j),machineId:j.machineId,jobId:j.id,layer:j.totalLayers,
+    if(layerAt(j,now())>=j.totalLayers-1e-9){ const s=lastSeg(j), te=now();
+      s.endTs=te; s.endLayer=j.totalLayers;
+      j.status='done'; j.endTs=te; j.endLayer=j.totalLayers; j.finish='auto';
+      addEvent({type:'job_stop',ts:te,machineId:j.machineId,jobId:j.id,layer:j.totalLayers,
         consumed:jobConsumedTotal(j),operatorId:j.operatorId,auto:true}); ch=true; } }
   return ch;
 }
@@ -636,7 +673,7 @@ function doserWindow(mid){
   for(const j of state.jobs){ if(j.machineId!==mid)continue;
     for(const sg of j.segments){
       const a=Math.max(ts,sg.startTs), b=segEndTs(j,sg); if(b<=a)continue;
-      const L=Math.max(0,layerInSeg(j,sg,b)-layerInSeg(j,sg,a));
+      const L=Math.max(0,layerAt(j,b)-layerAt(j,a));
       layers+=L; grooves+=L*sg.grooves/DAVKA_VRSTEV; } }
   return { ts, filled:r1(filled), emptied:r1(emptied), grooves,
            layers:Math.round(layers), estimated:r1(consumedIn(mid,ts,now())), residual:tankRaw(mid) };
@@ -753,12 +790,18 @@ function vPrehled(){
     if(j){
       const cl=currentLayer(j), pct=jobProgress(j)*100, s=lastSeg(j);
       need=needToFinish(j);
+      const eta=jobEta(j), age=now()-lastReadingTs(j);
       prog=`<div class="prog">
-        <div class="prog-head"><span class="l">vrstva ${fmtInt(cl)} / ${fmtInt(j.totalLayers)}</span>
-          <span class="r">${Math.round(pct)} % · zbývá ${fmtDur(jobEnd(j)-now())}</span></div>
+        <div class="prog-head"><span class="l">vrstva ~${fmtInt(cl)} / ${fmtInt(j.totalLayers)}</span>
+          <span class="r">${Math.round(pct)} % · ${eta?'zbývá '+fmtDur(eta-now()):'rychlost neznámá'}</span></div>
         <div class="prog-bar"><div class="prog-fill" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="prog-foot"><span class="need">Do konce ~<b>${fmtG(need)} g</b></span>
-          <span class="cfg">${j.layerHeight} µm · dávkování ${s.grooves} · ${fmtG(layerMass(s))} g/vrstvu</span></div></div>`;
+          <span class="cfg">${j.layerHeight} µm · dávkování ${s.grooves} · ${fmtG(layerMass(s))} g/vrstvu</span></div>
+        ${age>6*3600000?`<div class="prog-stale">Poslední zadání vrstvy před ${fmtDur(age)} — odhad je tím nejistější.</div>`:''}
+        <div class="layin">
+          <input class="inp" id="lay_${mc.id}" type="text" inputmode="numeric" placeholder="skutečná vrstva">
+          <button onclick="zapsatVrstvu('${mc.id}')">Zapsat vrstvu</button>
+        </div></div>`;
       if(need>tank+EPS) alert=`<div class="alert bad">Zásobník nemusí vystačit — odhad ${fmtG(tank)} g, do konce je potřeba ~${fmtG(need)} g.</div>`;
     }
     return `<div class="card" style="--c:${mat?mat.color:'#b9c0c7'}">
@@ -834,6 +877,7 @@ function vOperace(){
     ${mk('opVyprazdneni()','vyprazdneni','Vyprázdnění stroje','Vyvézt materiál do flašek nebo kontejneru (i po částech)')}
     <div class="op-group">Tisk — odhady (nemění evidenci)</div>
     ${mk('opStart()','start','Start tiskové úlohy','Čas, vrstvy, výška vrstvy a dávkování','est-op')}
+    ${mk('opVrstva()','drazky','Zadat aktuální vrstvu','Sesynchronizuje odhady podle skutečnosti','est-op')}
     ${mk('opDrazky()','drazky','Změna dávkování','Zafixuje dosavadní spotřebu a přepočítá odhad','est-op')}
     ${mk('opStop()','stop','Stop tiskové úlohy','Ukončit zadáním vrstvy','est-op')}
     <div class="op-group">Recyklace</div>
@@ -897,7 +941,7 @@ function vHistorie(){
   const items=[...state.movements.map(m=>({k:'mv',ts:m.ts,d:m})),
                ...state.events.map(e=>({k:'ev',ts:e.ts,d:e})),
                ...state.voids.map(v=>({k:'vd',ts:v.ts,d:v}))].sort((a,b)=>b.ts-a.ts);
-  const isJob=e=>['job_start','job_change','job_stop','cal_doser','cal_overflow'].includes(e.type);
+  const isJob=e=>['job_start','job_change','job_stop','job_layer','cal_doser','cal_overflow'].includes(e.type);
   const f=items.filter(it=>{
     if(histFilter==='all')return true;
     if(histFilter==='print')return it.k==='ev'&&isJob(it.d);
@@ -922,6 +966,8 @@ function vHistorie(){
       if(it.d.type==='job_change') return row(it.ts,`<span class="tchip job">Změna drážek</span>`,
         `<b>${nm}</b> · od vrstvy ${fmtInt(it.d.layer)}: dávkování ${it.d.from} → ${it.d.to}`,who,
         `~${fmtG(it.d.consumed)}`,'est');
+      if(it.d.type==='job_layer') return row(it.ts,`<span class="tchip job">Zadání vrstvy</span>`,
+        `<b>${nm}</b> · vrstva ${fmtInt(it.d.layer)}`,who);
       if(it.d.type==='cal_doser') return row(it.ts,`<span class="tchip job">Kalibrace dávkovače</span>`,
         `<b>${nm}</b> · z ${fmtInt(it.d.grooves)} drážek: ${fmt3(it.d.single)} g → průměr <b>${fmt3(it.d.value)} g</b> (${it.d.n} bodů)`,who);
       if(it.d.type==='cal_overflow'){ const c=cfgById(it.d.configId);
@@ -1144,7 +1190,7 @@ function opStart(machineId){
   openModal('start','Start tiskové úlohy',
     machSelect('fMach',m=>m.materialId&&!runningJob(m.id),mid)&&fld('Stroj',machSelect('fMach',m=>m.materialId&&!runningJob(m.id),mid))+
     `<div id="mi"></div>`+
-    fld('Celkový čas tisku',`<div class="dhm">
+    fld('Předpokládaný celkový čas tisku',`<div class="dhm">
       <span class="u"><input id="fD" type="text" inputmode="numeric" value="0"><span>dd</span></span>
       <span class="u"><input id="fH" type="text" inputmode="numeric" value="0"><span>hh</span></span>
       <span class="u"><input id="fM" type="text" inputmode="numeric" value="0"><span>mm</span></span></div>`)+
@@ -1512,6 +1558,53 @@ function opKorekce(){
   q('#fMach').onchange=refresh; refresh();
 }
 
+/* ===================== zadání aktuální vrstvy ===================== */
+function recordLayer(mid,layer,op){
+  const j=runningJob(mid); if(!j) return 'Na stroji neběží tisk.';
+  if(isNaN(layer)) return 'Zadejte číslo vrstvy.';
+  layer=Math.round(layer);
+  const a=jobAnchors(j), last=a[a.length-1];
+  if(layer<last.layer) return `Vrstva nemůže klesnout pod ${fmtInt(last.layer)} — poslední známou hodnotu. Omyl vrátíte tlačítkem Zpět.`;
+  if(layer>j.totalLayers) return `Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`;
+  const mc=machById(mid);
+  pushUndo(`Zadání vrstvy ${fmtInt(layer)} na ${mc.name}`);
+  j.readings=j.readings||[];
+  j.readings.push({ts:now(),layer});
+  addEvent({type:'job_layer',machineId:mid,jobId:j.id,layer,operatorId:op});
+  tickJobs();                       // dosažení poslední vrstvy úlohu rovnou uzavře
+  save();
+  return null;
+}
+function zapsatVrstvu(mid){
+  const inp=q('#lay_'+mid); if(!inp)return;
+  const op=state.currentOperatorId;
+  if(!op){ toast('Nejdřív vyberte obsluhu nahoře.',true); return; }
+  const v=parseNum(inp.value);
+  if(isNaN(v)){ toast('Zadejte číslo vrstvy.',true); return; }
+  const err=recordLayer(mid,v,op);
+  if(err) toast(err,true); else toast(`Vrstva ${fmtInt(Math.round(v))} zapsána`);
+}
+function opVrstva(machineId){
+  const jobs=state.jobs.filter(j=>j.status==='running');
+  if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
+  const mid=pickMach(machineId,jobs.map(j=>machById(j.machineId)));
+  openModal('drazky','Zadat aktuální vrstvu',
+    fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
+    fld('Skutečná vrstva podle stroje',numInput('fLayer','',''))+opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const mc=machById(q('#fMach').value); if(!mc){mErr('Vyberte stroj.');return false;}
+      const err=recordLayer(mc.id,parseNum(q('#fLayer').value),op);
+      if(err){mErr(err);return false;}
+      toast('Vrstva zapsána');
+    },'Zapsat','est');
+  const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
+    const r=jobRate(j)*3600000;
+    q('#mi').innerHTML=`<div class="modal-info est">Odhad nyní <b>${fmtInt(currentLayer(j))}</b> z ${fmtInt(j.totalLayers)} ·
+      naměřená rychlost <b>${r>0?fmt1(r)+' vrstev/h':'—'}</b> · poslední zadání před ${fmtDur(now()-lastReadingTs(j))}</div>`; };
+  q('#fMach').onchange=refresh; refresh();
+}
+
 /* ===================== operace kalibrace ===================== */
 function opKalDavkovac(mid){
   const mc=machById(mid); if(!mc||!mc.materialId){toast('Stroj nemá nasazený materiál.',true);return;}
@@ -1709,7 +1802,9 @@ function startTicker(){ clearInterval(ticker); ticker=setInterval(()=>{
   if(!state)return;
   const changed=tickJobs();
   if(changed){ save(); return; }
-  if(view==='prehled'&&!modalOpen()&&state.jobs.some(j=>j.status==='running')) render();
+  const ae=document.activeElement;
+  const busy=modalOpen()||padTarget||(ae&&ae.matches&&ae.matches('input,select,textarea'));
+  if(view==='prehled'&&!busy&&state.jobs.some(j=>j.status==='running')) render();
 },15000); }
 (async function(){ try{ state=await Store.load(); }catch(e){ state=null; }
   if(!state){ state=defaultState(); await Store.save(state); } else state=migrate(state);
