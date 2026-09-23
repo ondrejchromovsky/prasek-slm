@@ -114,6 +114,7 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
   font-size:.88rem; font-weight:700; cursor:pointer; white-space:nowrap}
 .layin button:hover{background:#5a4b8f}
 .prog-stale{font-size:.75rem; color:var(--warn); font-weight:600; margin-top:6px}
+.prog-rate{font-size:.75rem; color:var(--ink-faint); margin-top:6px}
 .alert{margin:11px 16px 0; padding:9px 12px; border-radius:10px; font-size:.83rem; font-weight:600;
   background:var(--warn-soft); color:var(--warn)}
 .alert.bad{background:var(--danger-soft); color:var(--danger)}
@@ -399,7 +400,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.10 · sklad, odhady, kalibrace</span><span class="sep"></span>
+  <span>v3.11 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -564,12 +565,22 @@ function jobAnchors(j){
     if(l&&p.ts===l.ts) out[out.length-1]=p; else out.push(p); }
   return out;
 }
-/* vrstev za milisekundu — z posledních dvou kotev, jinak z plánovaného času */
+const jobPlanEnd=j=>j.startTs+j.totalMs;
+/* Sklon použitý pro odhad: z poslední kotvy rovnou na PŮVODNÍ konec tisku.
+   Celkový čas ze stroje zohledňuje geometrii celého buildu, kdežto lokálně naměřená
+   rychlost platí jen pro právě probíhající úsek — proto se míří na plánovaný konec. */
 function jobRate(j){
+  const a=jobAnchors(j), last=a[a.length-1], tEnd=jobPlanEnd(j);
+  if(tEnd<=last.ts) return 0;                       // plán vyčerpán, není kam mířit
+  return (j.totalLayers-last.layer)/(tEnd-last.ts);
+}
+/* Skutečně naměřená rychlost z posledních dvou kotev — jen pro zobrazení,
+   do odhadu nevstupuje. */
+function jobMeasuredRate(j){
   const a=jobAnchors(j);
   if(a.length>=2){ const p=a[a.length-2], q=a[a.length-1];
     if(q.ts>p.ts&&q.layer>=p.layer) return (q.layer-p.layer)/(q.ts-p.ts); }
-  return j.totalMs>0 ? j.totalLayers/j.totalMs : 0;
+  return null;
 }
 function layerAt(j,ts){
   const a=jobAnchors(j);
@@ -580,14 +591,20 @@ function layerAt(j,ts){
       return p.layer+(ts-p.ts)/(q.ts-p.ts)*(q.layer-p.layer); } }
   const last=a[a.length-1];
   if(j.status!=='running') return last.layer;
+  /* po plánovaném konci nemá odhad o co se opřít — držíme poslední známou vrstvu,
+     místo abychom si postup vymýšleli */
+  if(jobPlanEnd(j)<=last.ts) return last.layer;
   return clamp(last.layer+jobRate(j)*(ts-last.ts), last.layer, j.totalLayers);
 }
 function currentLayer(j){ return j.status==='running'? layerAt(j,now()) : j.endLayer; }
 function jobProgress(j){ if(j.status!=='running')return 1;
   return j.totalLayers>0 ? clamp(currentLayer(j)/j.totalLayers,0,1) : 0; }
-/* předpokládaný konec z naměřené rychlosti; null, když stojí */
-function jobEta(j){ const r=jobRate(j); if(r<=0)return null;
-  return now()+(j.totalLayers-currentLayer(j))/r; }
+/* konec podle plánu; null, když je plán už vyčerpaný */
+function jobEta(j){ const e=jobPlanEnd(j); return e>now()?e:null; }
+/* kdy by tisk skončil při naměřené rychlosti — jen informativně */
+function jobEtaMeasured(j){ const m=jobMeasuredRate(j); if(!m||m<=0)return null;
+  const a=jobAnchors(j), last=a[a.length-1];
+  return last.ts+(j.totalLayers-last.layer)/m; }
 const lastReadingTs=j=>{ const a=jobAnchors(j); return a.length?a[a.length-1].ts:j.startTs; };
 /* „Dávkování" je počet drážek na DVĚ vrstvy — hmotnost na jednu vrstvu je tedy poloviční.
    Dělitel je schválně jen na tomhle jediném místě, aby se nedal nikde přehlédnout. */
@@ -793,11 +810,17 @@ function vPrehled(){
       const eta=jobEta(j), age=now()-lastReadingTs(j);
       prog=`<div class="prog">
         <div class="prog-head"><span class="l">vrstva ~${fmtInt(cl)} / ${fmtInt(j.totalLayers)}</span>
-          <span class="r">${Math.round(pct)} % · ${eta?'zbývá '+fmtDur(eta-now()):'rychlost neznámá'}</span></div>
+          <span class="r">${Math.round(pct)} % · ${eta?'zbývá '+fmtDur(eta-now()):'plán vyčerpán'}</span></div>
         <div class="prog-bar"><div class="prog-fill" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="prog-foot"><span class="need">Do konce ~<b>${fmtG(need)} g</b></span>
           <span class="cfg">${j.layerHeight} µm · dávkování ${s.grooves} · ${fmtG(layerMass(s))} g/vrstvu</span></div>
-        ${age>6*3600000?`<div class="prog-stale">Poslední zadání vrstvy před ${fmtDur(age)} — odhad je tím nejistější.</div>`:''}
+        ${(()=>{ const m=jobMeasuredRate(j), plan=jobRate(j);
+            if(m==null) return '';
+            const em=jobEtaMeasured(j), skluz=em?em-jobPlanEnd(j):0;
+            const txt=`naměřeno ${fmt1(m*3600000)} vrstev/h${plan>0?' · plán '+fmt1(plan*3600000):''}`;
+            return `<div class="prog-rate">${txt}${Math.abs(skluz)>1800000?` — při naměřené rychlosti konec o ${fmtDur(Math.abs(skluz))} ${skluz>0?'později':'dřív'}`:''}</div>`; })()}
+        ${eta===null?`<div class="prog-stale">Po plánovaném konci — odhad vrstvy stojí. Zadejte vrstvu nebo úlohu ukončete.</div>`
+          :(age>6*3600000?`<div class="prog-stale">Poslední zadání vrstvy před ${fmtDur(age)} — odhad je tím nejistější.</div>`:'')}
         <div class="layin">
           <input class="inp" id="lay_${mc.id}" type="text" inputmode="numeric" placeholder="skutečná vrstva">
           <button onclick="zapsatVrstvu('${mc.id}')">Zapsat vrstvu</button>
@@ -1599,9 +1622,10 @@ function opVrstva(machineId){
       toast('Vrstva zapsána');
     },'Zapsat','est');
   const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
-    const r=jobRate(j)*3600000;
+    const m=jobMeasuredRate(j), plan=jobRate(j);
     q('#mi').innerHTML=`<div class="modal-info est">Odhad nyní <b>${fmtInt(currentLayer(j))}</b> z ${fmtInt(j.totalLayers)} ·
-      naměřená rychlost <b>${r>0?fmt1(r)+' vrstev/h':'—'}</b> · poslední zadání před ${fmtDur(now()-lastReadingTs(j))}</div>`; };
+      plán <b>${plan>0?fmt1(plan*3600000)+' vrstev/h':'vyčerpán'}</b>${m!=null?` · naměřeno <b>${fmt1(m*3600000)} vrstev/h</b>`:''} ·
+      poslední zadání před ${fmtDur(now()-lastReadingTs(j))}</div>`; };
   q('#fMach').onchange=refresh; refresh();
 }
 
