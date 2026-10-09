@@ -108,6 +108,9 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .prog-foot .need{color:var(--est); font-weight:650}
 .prog-foot .need b{font-family:var(--mono)}
 .prog-foot .cfg{color:var(--ink-faint); font-size:.78rem}
+.jrow{display:grid; grid-template-columns:1fr 1.2fr auto; gap:8px; align-items:center; margin-bottom:8px}
+.jrow .inp{padding:11px 12px; font-size:.95rem}
+.jrow .tnote{padding-left:4px}
 .layin{display:flex; gap:8px; align-items:center; margin-top:11px}
 .layin .inp{flex:1; padding:11px 13px; font-family:var(--mono); font-size:1.05rem; font-weight:600; text-align:right}
 .layin button{border:0; background:var(--est); color:#fff; border-radius:10px; padding:12px 18px;
@@ -175,7 +178,11 @@ main{max-width:1120px; margin:0 auto; padding:20px 18px 60px}
 .op-group:first-child{margin-top:0}
 
 /* ---- history ---- */
-.filters{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px}
+.filters{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px}
+.hfilt{display:grid; grid-template-columns:minmax(200px,2fr) repeat(2,minmax(130px,1fr)) repeat(2,minmax(130px,1fr)) auto;
+  gap:8px; margin-bottom:14px; align-items:center}
+.hfilt .inp{padding:10px 12px; font-size:.9rem}
+@media (max-width:820px){ .hfilt{grid-template-columns:1fr 1fr} .hfilt #hQ{grid-column:1/-1} }
 .filters button{border:1px solid var(--line); background:var(--surface); padding:7px 13px; border-radius:999px;
   font-size:.83rem; font-weight:600; color:var(--ink-soft); cursor:pointer}
 .filters button[aria-pressed="true"]{background:var(--ink); color:#fff; border-color:var(--ink)}
@@ -400,7 +407,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.11 · sklad, odhady, kalibrace</span><span class="sep"></span>
+  <span>v3.13 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -469,12 +476,13 @@ const L={SUPPLIER:'SUPPLIER',WASTE:'WASTE',DISPOSAL:'DISPOSAL',CORR:'KOREKCE',PA
 const MACH=id=>'MACHINE:'+id, CONT=id=>'CONTAINER:'+id, BOTT=m=>'BOTTLES:'+m;
 
 /* ===================== state ===================== */
-let state=null, view='prehled', histFilter='all', modalSubmit=null, ticker=null;
+let state=null, view='prehled', modalSubmit=null, ticker=null;
+let hist={group:'all',machineId:'',materialId:'',q:'',from:'',to:'',limit:200};
 const MAT_COLORS=['#3b6ea5','#b5651d','#4a7c59','#7d5ba6','#b03a5b','#2b8a8a','#9a7d0a','#5a6b7d'];
 
 function defaultState(){
   const a=uid(), b=uid(), op=uid(), m1=uid(), m2=uid();
-  return { version:5,
+  return { version:6,
     materials:[{id:a,name:'AlSi10Mg',color:'#3b6ea5',density:2.67},{id:b,name:'316L',color:'#b5651d',density:7.99}],
     machines:[{id:m1,name:'Stroj 1',materialId:null},{id:m2,name:'Stroj 2',materialId:null}],
     operators:[{id:op,name:'Obsluha 1'}],
@@ -512,6 +520,23 @@ function migrate(s){
     s.version=4;
   }
   if(s.version<5){ s.version=5; }
+  if(s.version<6){          // průběh tisku: řetěz časových úseků -> osa vrstev
+    (s.jobs||[]).forEach(j=>{
+      if(j.changes) return;
+      const segs=j.segments||[];
+      j.changes=segs.map(sg=>({layer:sg.startLayer||0,configId:sg.configId,grooves:sg.grooves,
+        massPerGroove:sg.massPerGroove,fillRate:sg.fillRate}));
+      /* hranice úseků byly dosud i časovými kotvami — zachováme je jako odečty,
+         aby se křivka starých úloh nezměnila */
+      const r=(j.readings||[]).slice();
+      segs.forEach(sg=>{ if(sg.endTs!=null&&sg.endLayer!=null&&!r.some(x=>x.ts===sg.endTs))
+        r.push({ts:sg.endTs,layer:sg.endLayer}); });
+      j.readings=r.sort((a,b)=>a.ts-b.ts);
+      if(j.status!=='running') j.confirmed=true;   // staré uzavřené bereme jako potvrzené
+      delete j.segments;
+    });
+    s.version=6;
+  }
   return s;
 }
 const matById=id=>state.materials.find(m=>m.id===id);
@@ -544,8 +569,31 @@ const groovesFor=(mid,mat,h)=>[...new Set(configsFor(mid,mat).filter(c=>c.layerH
 const findConfig=(mid,mat,h,g)=>state.configs.find(c=>c.machineId===mid&&c.materialId===mat&&c.layerHeight===h&&c.grooves===g);
 const runningJob=mid=>state.jobs.find(j=>j.machineId===mid&&j.status==='running');
 
-const lastSeg=j=>j.segments[j.segments.length-1];
-const segEndTs=(j,s)=>s.endTs!=null?s.endTs:(j.status==='running'?now():j.endTs);
+/* --- průběh tisku jako osa vrstev ---
+   j.changes = značky dávkování, každá jen s číslem vrstvy (první je na vrstvě 0)
+   j.readings = odečty vrstvy, ty jediné nesou skutečný čas
+   Spotřeba se počítá z úseků mezi značkami a na čase nezávisí, takže dodatečná
+   oprava průběhu je přepsání jednoho čísla. */
+function jobSpans(j){
+  const ch=[...(j.changes||[])].sort((a,b)=>a.layer-b.layer), out=[];
+  for(let i=0;i<ch.length;i++){
+    const from=Math.max(0,ch[i].layer);
+    const to=(i+1<ch.length)?Math.max(from,ch[i+1].layer):j.totalLayers;
+    if(to>from) out.push({...ch[i],from,to});
+  }
+  return out;
+}
+const accumUpTo=(j,L,f)=>jobSpans(j).reduce((s,sp)=>s+Math.max(0,Math.min(L,sp.to)-sp.from)*f(sp),0);
+const consumedUpTo=(j,L)=>accumUpTo(j,L,layerMass);
+const groovesUpTo=(j,L)=>accumUpTo(j,L,sp=>sp.grooves/DAVKA_VRSTEV);
+/* značka platná pro danou vrstvu — pro zobrazení aktuálního dávkování */
+function curChange(j,L){
+  const ch=[...(j.changes||[])].sort((a,b)=>a.layer-b.layer);
+  if(!ch.length)return null;
+  const l=L==null?currentLayer(j):L;
+  let cur=ch[0]; for(const c of ch) if(c.layer<=l) cur=c;
+  return cur;
+}
 
 /* vrstva v čase — uzavřený segment interpoluje mezi zadanými vrstvami,
    otevřený segment míří na celkový počet vrstev v zadaném čase tisku */
@@ -557,7 +605,6 @@ const segEndTs=(j,s)=>s.endTs!=null?s.endTs:(j.status==='running'?now():j.endTs)
    slouží jen jako výchozí rychlost, dokud první zadání nepřijde. */
 function jobAnchors(j){
   const a=[{ts:j.startTs,layer:0}];
-  for(const sg of j.segments) if(sg.endTs!=null) a.push({ts:sg.endTs,layer:sg.endLayer});
   for(const r of (j.readings||[])) a.push({ts:r.ts,layer:r.layer});
   if(j.status!=='running'&&j.endTs!=null) a.push({ts:j.endTs,layer:j.endLayer});
   a.sort((x,y)=>x.ts-y.ts||x.layer-y.layer);
@@ -610,14 +657,26 @@ const lastReadingTs=j=>{ const a=jobAnchors(j); return a.length?a[a.length-1].ts
    Dělitel je schválně jen na tomhle jediném místě, aby se nedal nikde přehlédnout. */
 const DAVKA_VRSTEV=2;
 const layerMass=c=>c.grooves*c.massPerGroove/DAVKA_VRSTEV;      // g na jednu vrstvu
-const segConsumed=(j,s,a,b)=>Math.max(0,layerAt(j,b)-layerAt(j,a))*layerMass(s);
+/* čas, kdy tisk dosáhl dané vrstvy — inverze křivky kotev; null, když stojí */
+function timeAtLayer(j,L){
+  const a=jobAnchors(j);
+  if(L<=a[0].layer) return a[0].ts;
+  for(let i=1;i<a.length;i++){
+    if(L<=a[i].layer){ const p=a[i-1], q=a[i];
+      if(q.layer<=p.layer) return q.ts;
+      return p.ts+(L-p.layer)/(q.layer-p.layer)*(q.ts-p.ts); } }
+  const last=a[a.length-1];
+  if(j.status!=='running') return j.endTs;
+  const r=jobRate(j); if(r<=0) return null;
+  return last.ts+(L-last.layer)/r;
+}
 
 /* spotřeba (ze zásobníku do komory) v časovém okně */
 function consumedIn(mid,t0,t1){
   let g=0;
   for(const j of state.jobs){ if(j.machineId!==mid)continue;
-    for(const s of j.segments){ const a=Math.max(t0,s.startTs), b=Math.min(t1,segEndTs(j,s));
-      if(b>a) g+=segConsumed(j,s,a,b); } }
+    const a=clamp(layerAt(j,t0),0,j.totalLayers), b=clamp(layerAt(j,t1),0,j.totalLayers);
+    if(b>a) g+=consumedUpTo(j,b)-consumedUpTo(j,a); }
   return g;
 }
 /* poslední reset přepadů: odebrání přepadů / změna materiálu / korekce */
@@ -654,24 +713,27 @@ const tankEst=mid=>Math.max(0,tankRaw(mid));
 function ovfEst(mid){
   const t0=lastOvfReset(mid), t1=now(); let g=0;
   for(const j of state.jobs){ if(j.machineId!==mid)continue;
-    for(const s of j.segments){ const a=Math.max(t0,s.startTs), b=Math.min(t1,segEndTs(j,s));
-      if(b>a) g+=s.fillRate*(b-a)/3600000; } }
+    const curL=currentLayer(j);
+    for(const sp of jobSpans(j)){
+      const ta=timeAtLayer(j,sp.from), tb=timeAtLayer(j,Math.min(sp.to,curL));
+      if(ta==null||tb==null)continue;
+      const a=Math.max(t0,ta), b=Math.min(t1,tb);
+      if(b>a) g+=sp.fillRate*(b-a)/3600000; } }
   return clamp(r1(g),0,mMass(balances(),mid));
 }
 /* materiál potřebný do konce tisku při aktuální konfiguraci */
-function needToFinish(j){ const s=lastSeg(j);
-  return r1(Math.max(0,j.totalLayers-currentLayer(j))*layerMass(s)); }
+function needToFinish(j){
+  return r1(Math.max(0,consumedUpTo(j,j.totalLayers)-consumedUpTo(j,currentLayer(j)))); }
 /* automatické ukončení odpočtem */
 function tickJobs(){ let ch=false;
   for(const j of state.jobs){ if(j.status!=='running')continue;
-    if(layerAt(j,now())>=j.totalLayers-1e-9){ const s=lastSeg(j), te=now();
-      s.endTs=te; s.endLayer=j.totalLayers;
-      j.status='done'; j.endTs=te; j.endLayer=j.totalLayers; j.finish='auto';
+    if(layerAt(j,now())>=j.totalLayers-1e-9){ const te=now();
+      j.status='done'; j.endTs=te; j.endLayer=j.totalLayers; j.finish='auto'; j.confirmed=false;
       addEvent({type:'job_stop',ts:te,machineId:j.machineId,jobId:j.id,layer:j.totalLayers,
         consumed:jobConsumedTotal(j),operatorId:j.operatorId,auto:true}); ch=true; } }
   return ch;
 }
-function jobConsumedTotal(j){ let g=0; for(const s of j.segments) g+=segConsumed(j,s,s.startTs,segEndTs(j,s)); return r1(g); }
+const jobConsumedTotal=j=>r1(consumedUpTo(j,currentLayer(j)));
 
 /* ===================== KALIBRACE =====================
    Dávkovač: v okně od poslední kotvy se sečte navážené, vyvezené a počet skutečně
@@ -688,10 +750,8 @@ function doserWindow(mid){
     else if(m.type==='vyprazdneni') emptied+=m.amount; }
   let grooves=0, layers=0;
   for(const j of state.jobs){ if(j.machineId!==mid)continue;
-    for(const sg of j.segments){
-      const a=Math.max(ts,sg.startTs), b=segEndTs(j,sg); if(b<=a)continue;
-      const L=Math.max(0,layerAt(j,b)-layerAt(j,a));
-      layers+=L; grooves+=L*sg.grooves/DAVKA_VRSTEV; } }
+    const a=clamp(layerAt(j,ts),0,j.totalLayers), b=currentLayer(j);
+    if(b>a){ layers+=b-a; grooves+=groovesUpTo(j,b)-groovesUpTo(j,a); } }
   return { ts, filled:r1(filled), emptied:r1(emptied), grooves,
            layers:Math.round(layers), estimated:r1(consumedIn(mid,ts,now())), residual:tankRaw(mid) };
 }
@@ -787,7 +847,7 @@ function render(){
   else if(view==='sklad')m.innerHTML=vSklad();
   else if(view==='operace')m.innerHTML=vOperace();
   else if(view==='kalibrace')m.innerHTML=vKalibrace();
-  else if(view==='historie'){m.innerHTML=vHistorie(); qa('.filters button').forEach(b=>b.onclick=()=>{histFilter=b.dataset.f;render();});}
+  else if(view==='historie'){m.innerHTML=vHistorie(); bindHist();}
   else if(view==='nastaveni')m.innerHTML=vNastaveni();
   q('#storeMode').textContent=Store.mode();
 }
@@ -805,7 +865,7 @@ function vPrehled(){
     const bott=mat?botMass(b,mat.id):0;
     let prog='', alert='', need=0;
     if(j){
-      const cl=currentLayer(j), pct=jobProgress(j)*100, s=lastSeg(j);
+      const cl=currentLayer(j), pct=jobProgress(j)*100, s=curChange(j)||{grooves:0,massPerGroove:0};
       need=needToFinish(j);
       const eta=jobEta(j), age=now()-lastReadingTs(j);
       prog=`<div class="prog">
@@ -826,6 +886,10 @@ function vPrehled(){
           <button onclick="zapsatVrstvu('${mc.id}')">Zapsat vrstvu</button>
         </div></div>`;
       if(need>tank+EPS) alert=`<div class="alert bad">Zásobník nemusí vystačit — odhad ${fmtG(tank)} g, do konce je potřeba ~${fmtG(need)} g.</div>`;
+    } else {
+      const u=lastUnconfirmed(mc.id);
+      if(u) alert=`<div class="alert">Tisk uzavřen odpočtem ve vrstvě ${fmtInt(u.endLayer)} — potvrďte skutečný průběh.
+        <button class="mini-btn" style="margin-left:8px" onclick="opUzavrit('${mc.id}','${u.id}')">Zadat průběh</button></div>`;
     }
     return `<div class="card" style="--c:${mat?mat.color:'#b9c0c7'}">
       <div class="card-top"><span class="name">${esc(mc.name)}</span>
@@ -844,7 +908,7 @@ function vPrehled(){
       <div class="card-foot"><span>Flašky${mat?' '+esc(mat.name):''} <b>${mat?fmtG(bott)+' g':'—'}</b></span></div>
       <div class="card-acts">
         ${j?`<button class="est" onclick="opDrazky('${mc.id}')">Změnit dávkování</button>
-             <button class="stop" onclick="opStop('${mc.id}')">Stop</button>`
+             <button class="stop" onclick="opUzavrit('${mc.id}')">Uzavřít tisk</button>`
            :`<button class="est" onclick="opStart('${mc.id}')" ${mat?'':'disabled'}>Start tisku</button>`}
         <span class="sep"></span>
         <button class="pri" onclick="opNaplneni('${mc.id}')">Naplnit</button>
@@ -902,7 +966,7 @@ function vOperace(){
     ${mk('opStart()','start','Start tiskové úlohy','Čas, vrstvy, výška vrstvy a dávkování','est-op')}
     ${mk('opVrstva()','drazky','Zadat aktuální vrstvu','Sesynchronizuje odhady podle skutečnosti','est-op')}
     ${mk('opDrazky()','drazky','Změna dávkování','Zafixuje dosavadní spotřebu a přepočítá odhad','est-op')}
-    ${mk('opStop()','stop','Stop tiskové úlohy','Ukončit zadáním vrstvy','est-op')}
+    ${mk('opUzavrit()','stop','Uzavření tisku','Skutečná poslední vrstva a průběh dávkování','est-op')}
     <div class="op-group">Recyklace</div>
     ${mk('opPreseti()','preseti','Přesetí','Z flašek do stroje nebo kontejneru (váží se výstup)')}
     ${mk('opFlaskyPrazdne()','flasky','Flašky prázdné','Vynulovat flašky — zbytek je odpad z přesévání','warn-op')}
@@ -955,63 +1019,145 @@ function vKalibrace(){
         </div>
         <div class="kal-pts">Body: ${ptsTxt}</div>
       </div>
+      ${(()=>{ const js=state.jobs.filter(x=>x.machineId===mc.id&&(x.endTs||x.startTs)>=w.ts)
+                 .sort((a,b)=>(b.endTs||b.startTs)-(a.endTs||a.startTs)).slice(0,8);
+         if(!js.length) return '';
+         return `<div class="kal-sec"><h4>Tisky v tomto okně — zkontrolujte před kalibrací</h4>`+
+           js.map(x=>`<div class="kal-cfg">
+             <div><span class="lbl">${x.status==='running'?'probíhá':fmtDate(x.endTs)}</span>
+               ${x.status==='running'?'tisk běží':`vrstva ${fmtInt(x.endLayer)} / ${fmtInt(x.totalLayers)}`}
+               ${x.edited?'<span class="tag muted">upraveno</span>':''}
+               ${x.confirmed===false?'<span class="tag warn">nepotvrzeno</span>':''}</div>
+             <div><span class="lbl">dávkování</span><span class="v">${(x.changes||[]).map(c=>c.grooves).join(' → ')}</span></div>
+             <div><span class="lbl">spotřeba</span><span class="v est">~${fmtG(jobConsumedTotal(x))} g</span></div>
+             <div><button class="mini-btn" onclick="opUzavrit('${mc.id}','${x.id}')">${x.status==='running'?'Uzavřít':'Opravit'}</button></div>
+           </div>`).join('')+`</div>`; })()}
       <div class="kal-sec"><h4>Plnění přepadů — podle konfigurace</h4>${cfgRows}</div>
     </div>`;}).join('');
   return `<div class="viewhead"><h2>Kalibrace</h2><span class="sub">Odvozeno z vážených pohybů. Dávkovač se kalibruje při prázdném zásobníku.</span></div>${blocks}`;
 }
 
-function vHistorie(){
-  const items=[...state.movements.map(m=>({k:'mv',ts:m.ts,d:m})),
-               ...state.events.map(e=>({k:'ev',ts:e.ts,d:e})),
-               ...state.voids.map(v=>({k:'vd',ts:v.ts,d:v}))].sort((a,b)=>b.ts-a.ts);
-  const isJob=e=>['job_start','job_change','job_stop','job_layer','cal_doser','cal_overflow'].includes(e.type);
-  const f=items.filter(it=>{
-    if(histFilter==='all')return true;
-    if(histFilter==='print')return it.k==='ev'&&isJob(it.d);
-    if(histFilter==='loss')return it.k==='mv'&&(it.d.to===L.WASTE);
-    if(histFilter==='machine')return it.k==='mv'&&['naplneni','odebrani_prepadu','vyprazdneni','zmena_materialu','korekce'].includes(it.d.type);
-    if(histFilter==='sklad')return (it.k==='mv'&&['prijem','preseti'].includes(it.d.type))||(it.k==='ev'&&it.d.type==='drying');
-    return true; });
-  const fb=(k,l)=>`<button data-f="${k}" aria-pressed="${histFilter===k}">${l}</button>`;
-  const bar=`<div class="filters">${fb('all','Vše')}${fb('sklad','Sklad & recyklace')}${fb('machine','Stroje')}${fb('print','Tisk a kalibrace')}${fb('loss','Odpad & ztráty')}</div>`;
-  if(!f.length) return `<div class="viewhead"><h2>Historie</h2></div>${bar}`+
-    emptyBox('Zatím žádné záznamy','Po první operaci se tu objeví úplný auditní záznam.','Přejít na Operace',"go('operace')");
-  const rows=f.slice(0,400).map(it=>{
-    const o=opById(it.d.operatorId), who=o?o.name:'—';
-    if(it.k==='vd') return row(it.ts,`<span class="tchip void">Anulováno</span>`,esc(it.d.label),who,'','','voided');
-    if(it.k==='ev'&&it.d.type==='drying'){ const c=contById(it.d.containerId), mat=c&&matById(c.materialId);
-      return row(it.ts,`<span class="tchip event">Vysušení</span>${mat?matMini(mat):''}`,
-        `Kontejner <b>č. ${c?c.number:'?'}</b> · ${fmtDate(new Date(it.d.date+'T00:00:00').getTime())}`,who); }
-    if(it.k==='ev'&&isJob(it.d)){
-      const mc=machById(it.d.machineId), nm=mc?esc(mc.name):'stroj';
-      if(it.d.type==='job_start') return row(it.ts,`<span class="tchip job">Start tisku</span>`,
-        `<b>${nm}</b> · ${fmtInt(it.d.totalLayers)} vrstev · ${it.d.layerHeight} µm · dávkování ${it.d.grooves}`,who);
-      if(it.d.type==='job_change') return row(it.ts,`<span class="tchip job">Změna drážek</span>`,
-        `<b>${nm}</b> · od vrstvy ${fmtInt(it.d.layer)}: dávkování ${it.d.from} → ${it.d.to}`,who,
-        `~${fmtG(it.d.consumed)}`,'est');
-      if(it.d.type==='job_layer') return row(it.ts,`<span class="tchip job">Zadání vrstvy</span>`,
-        `<b>${nm}</b> · vrstva ${fmtInt(it.d.layer)}`,who);
-      if(it.d.type==='cal_doser') return row(it.ts,`<span class="tchip job">Kalibrace dávkovače</span>`,
-        `<b>${nm}</b> · z ${fmtInt(it.d.grooves)} drážek: ${fmt3(it.d.single)} g → průměr <b>${fmt3(it.d.value)} g</b> (${it.d.n} bodů)`,who);
-      if(it.d.type==='cal_overflow'){ const c=cfgById(it.d.configId);
-        return row(it.ts,`<span class="tchip job">Kalibrace přepadů</span>`,
-          `<b>${nm}</b>${c?' · '+c.layerHeight+' µm · dávkování '+c.grooves:''} · ${fmt1(it.d.single)} g/h → průměr <b>${fmt1(it.d.value)} g/h</b> (${it.d.n})`,who); }
-      return row(it.ts,`<span class="tchip job">Konec tisku${it.d.auto?' (odpočet)':''}</span>`,
-        `<b>${nm}</b> · vrstva ${fmtInt(it.d.layer)} · spotřeba odhadem`,who,`~${fmtG(it.d.consumed)}`,'est');
-    }
-    const m=it.d, t=TYPE[m.type]||{l:m.type,c:'move'}, mat=matById(m.materialId);
-    const loss=m.to===L.WASTE, gain=m.from===L.CORR;
-    return row(m.ts,`<span class="tchip ${t.c}">${t.l}</span>${mat?matMini(mat):''}`,
-      `<b>${esc(locName(m.from))}</b> → <b>${esc(locName(m.to))}</b>`,
-      (m.note?m.note+' · ':'')+who,(loss?'−':(gain?'+':''))+fmtG(m.amount),loss?'neg':(gain?'pos':''));
-  }).join('');
-  function row(ts,chips,flow,who,amt,amtCls,rowCls){
-    return `<div class="log-row ${rowCls||''}"><div class="log-when">${fmtDate(ts)}<br>${fmtTime(ts)}</div>
-      <div class="log-mid"><div class="log-line1">${chips}</div><div class="log-flow">${flow}</div>
-      <div class="log-note">${esc(who)}</div></div>
-      <div class="log-amt ${amtCls||''}">${amt?amt+'<span class="u"> g</span>':'<span style="color:var(--ink-faint)">—</span>'}</div></div>`;
+/* ===================== historie =====================
+   Záznamy se nejdřív převedou na jednotný tvar (čas, stroj, materiál, skupiny, text),
+   teprve pak se filtruje a hledá. Hledání jede nad textem, který se zobrazuje,
+   plus jméno obsluhy a hmotnost, takže najde i "č. 7" nebo "1234". */
+const JOBEV=['job_start','job_change','job_stop','job_edit','job_layer','cal_doser','cal_overflow'];
+function histNorm(){
+  const out=[];
+  const who=id=>{const o=opById(id); return o?o.name:'—';};
+  for(const v of state.voids) out.push({ts:v.ts,machineId:null,materialId:null,groups:['jine'],
+    chips:`<span class="tchip void">Anulováno</span>`,flow:esc(v.label),note:who(v.operatorId),
+    amt:'',amtCls:'',rowCls:'voided',text:['anulováno',v.label,who(v.operatorId)].join(' ')});
+  for(const e of state.events){
+    const w=who(e.operatorId), mc=e.machineId?machById(e.machineId):null, nm=mc?esc(mc.name):'stroj';
+    if(e.type==='drying'){ const c=contById(e.containerId), mat=c&&matById(c.materialId);
+      out.push({ts:e.ts,machineId:null,materialId:c?c.materialId:null,groups:['sklad'],
+        chips:`<span class="tchip event">Vysušení</span>${mat?matMini(mat):''}`,
+        flow:`Kontejner <b>č. ${c?c.number:'?'}</b> · ${fmtDate(new Date(e.date+'T00:00:00').getTime())}`,
+        note:w,amt:'',amtCls:'',rowCls:'',
+        text:['vysušení',mat?mat.name:'',c?'č. '+c.number:'',w].join(' ')}); continue; }
+    if(!JOBEV.includes(e.type)) continue;
+    const base={ts:e.ts,machineId:e.machineId||null,materialId:e.materialId||(mc?mc.materialId:null),
+      groups:['tisk'],note:w,amt:'',amtCls:'',rowCls:''};
+    if(e.type==='job_start') out.push({...base,chips:`<span class="tchip job">Start tisku</span>`,
+      flow:`<b>${nm}</b> · ${fmtInt(e.totalLayers)} vrstev · ${e.layerHeight} µm · dávkování ${e.grooves}`,
+      text:['start tisku',nm,e.totalLayers,e.layerHeight,e.grooves,w].join(' ')});
+    else if(e.type==='job_change') out.push({...base,chips:`<span class="tchip job">Změna dávkování</span>`,
+      flow:`<b>${nm}</b> · od vrstvy ${fmtInt(e.layer)}: dávkování ${e.from} → ${e.to}`,
+      amt:`~${fmtG(e.consumed)}`,amtCls:'est',
+      text:['změna dávkování',nm,e.layer,e.from,e.to,w].join(' ')});
+    else if(e.type==='job_edit') out.push({...base,chips:`<span class="tchip job">Oprava průběhu tisku</span>`,
+      flow:`<b>${nm}</b> · poslední vrstva ${e.from!=null?fmtInt(e.from)+' → ':''}${fmtInt(e.layer)} · změn dávkování ${e.prevChanges} → ${e.changes}`,
+      amt:`~${fmtG(e.consumed)}`,amtCls:'est',
+      text:['oprava průběhu tisku',nm,e.layer,w].join(' ')});
+    else if(e.type==='job_layer') out.push({...base,chips:`<span class="tchip job">Zadání vrstvy</span>`,
+      flow:`<b>${nm}</b> · vrstva ${fmtInt(e.layer)}`,
+      text:['zadání vrstvy',nm,e.layer,w].join(' ')});
+    else if(e.type==='cal_doser') out.push({...base,chips:`<span class="tchip job">Kalibrace dávkovače</span>`,
+      flow:`<b>${nm}</b> · z ${fmtInt(e.grooves)} drážek: ${fmt3(e.single)} g → průměr <b>${fmt3(e.value)} g</b> (${e.n} bodů)`,
+      text:['kalibrace dávkovače',nm,fmt3(e.value),w].join(' ')});
+    else if(e.type==='cal_overflow'){ const c=cfgById(e.configId);
+      out.push({...base,chips:`<span class="tchip job">Kalibrace přepadů</span>`,
+        flow:`<b>${nm}</b>${c?' · '+c.layerHeight+' µm · dávkování '+c.grooves:''} · ${fmt1(e.single)} g/h → průměr <b>${fmt1(e.value)} g/h</b> (${e.n})`,
+        text:['kalibrace přepadů',nm,fmt1(e.value),w].join(' ')}); }
+    else out.push({...base,chips:`<span class="tchip job">Konec tisku${e.auto?' (odpočet)':''}</span>`,
+      flow:`<b>${nm}</b> · vrstva ${fmtInt(e.layer)} · spotřeba odhadem`,
+      amt:`~${fmtG(e.consumed)}`,amtCls:'est',
+      text:['konec tisku',nm,e.layer,w].join(' ')});
   }
-  return `<div class="viewhead"><h2>Historie</h2><span class="sub">${f.length} záznamů</span></div>${bar}<div class="log">${rows}</div>`;
+  for(const m of state.movements){
+    const t=TYPE[m.type]||{l:m.type,c:'move'}, mat=matById(m.materialId), w=who(m.operatorId);
+    const loss=m.to===L.WASTE, gain=m.from===L.CORR;
+    const g=[]; 
+    if(['prijem','preseti'].includes(m.type)) g.push('sklad');
+    if(['naplneni','odebrani_prepadu','vyprazdneni','zmena_materialu','korekce'].includes(m.type)) g.push('stroj');
+    if(loss) g.push('odpad');
+    if(!g.length) g.push('jine');
+    out.push({ts:m.ts,machineId:m.machineId||null,materialId:m.materialId||null,groups:g,
+      chips:`<span class="tchip ${t.c}">${t.l}</span>${mat?matMini(mat):''}`,
+      flow:`<b>${esc(locName(m.from))}</b> → <b>${esc(locName(m.to))}</b>`,
+      note:(m.note?m.note+' · ':'')+w,
+      amt:(loss?'−':(gain?'+':''))+fmtG(m.amount),amtCls:loss?'neg':(gain?'pos':''),rowCls:'',
+      text:[t.l,mat?mat.name:'',locName(m.from),locName(m.to),m.note||'',w,fmtG(m.amount),m.amount].join(' ')});
+  }
+  return out.sort((a,b)=>b.ts-a.ts);
+}
+function histFiltered(){
+  const q=(hist.q||'').trim().toLowerCase();
+  const from=hist.from?new Date(hist.from+'T00:00:00').getTime():null;
+  const to=hist.to?new Date(hist.to+'T23:59:59').getTime():null;
+  return histNorm().filter(it=>{
+    if(hist.group!=='all'&&!it.groups.includes(hist.group))return false;
+    if(hist.machineId&&it.machineId!==hist.machineId)return false;
+    if(hist.materialId&&it.materialId!==hist.materialId)return false;
+    if(from!=null&&it.ts<from)return false;
+    if(to!=null&&it.ts>to)return false;
+    if(q&&!(it.text||'').toLowerCase().includes(q))return false;
+    return true; });
+}
+function renderHistList(){
+  const el=q('#histList'); if(!el)return;
+  const f=histFiltered();
+  const cnt=q('#histCount'); if(cnt) cnt.textContent=`${f.length} ${f.length===1?'záznam':(f.length<5?'záznamy':'záznamů')}`;
+  if(!f.length){ el.innerHTML=`<div class="empty"><div class="big">Nic neodpovídá filtru</div><p>Zkuste zrušit část podmínek.</p>
+    <button class="btn secondary" onclick="histReset()">Zrušit filtry</button></div>`; return; }
+  const shown=f.slice(0,hist.limit);
+  el.innerHTML=`<div class="log">`+shown.map(it=>
+    `<div class="log-row ${it.rowCls}"><div class="log-when">${fmtDate(it.ts)}<br>${fmtTime(it.ts)}</div>
+      <div class="log-mid"><div class="log-line1">${it.chips}</div><div class="log-flow">${it.flow}</div>
+      <div class="log-note">${esc(it.note)}</div></div>
+      <div class="log-amt ${it.amtCls}">${it.amt?it.amt+'<span class="u"> g</span>':'<span style="color:var(--ink-faint)">—</span>'}</div></div>`).join('')
+    +`</div>`+(f.length>shown.length
+      ?`<div style="text-align:center;margin-top:14px"><button class="btn secondary" onclick="histMore()">Zobrazit dalších ${Math.min(200,f.length-shown.length)} z ${f.length}</button></div>`:'');
+}
+function histMore(){ hist.limit+=200; renderHistList(); }
+function histReset(){ hist={group:'all',machineId:'',materialId:'',q:'',from:'',to:'',limit:200}; render(); }
+function vHistorie(){
+  if(!state.movements.length&&!state.events.length) return `<div class="viewhead"><h2>Historie</h2></div>`+
+    emptyBox('Zatím žádné záznamy','Po první operaci se tu objeví úplný auditní záznam.','Přejít na Operace',"go('operace')");
+  const fb=(k,l)=>`<button data-g="${k}" aria-pressed="${hist.group===k}">${l}</button>`;
+  const opt=(v,l,cur)=>`<option value="${v}" ${v===cur?'selected':''}>${esc(l)}</option>`;
+  const active=hist.machineId||hist.materialId||hist.q||hist.from||hist.to||hist.group!=='all';
+  return `<div class="viewhead"><h2>Historie</h2><span class="sub" id="histCount"></span></div>
+  <div class="filters">${fb('all','Vše')}${fb('sklad','Sklad a recyklace')}${fb('stroj','Stroje')}${fb('tisk','Tisk a kalibrace')}${fb('odpad','Odpad a ztráty')}</div>
+  <div class="hfilt">
+    <input class="inp" id="hQ" type="search" placeholder="Hledat — kontejner, šarže, poznámka, obsluha…" value="${esc(hist.q)}">
+    <select class="inp" id="hMach">${opt('','Všechny stroje',hist.machineId)}${state.machines.map(m=>opt(m.id,m.name,hist.machineId)).join('')}</select>
+    <select class="inp" id="hMat">${opt('','Všechny materiály',hist.materialId)}${state.materials.map(m=>opt(m.id,m.name,hist.materialId)).join('')}</select>
+    <input class="inp" id="hFrom" type="date" value="${hist.from}" aria-label="Od data">
+    <input class="inp" id="hTo" type="date" value="${hist.to}" aria-label="Do data">
+    ${active?`<button class="mini-btn" onclick="histReset()">Zrušit filtry</button>`:''}
+  </div>
+  <div id="histList"></div>`;
+}
+function bindHist(){
+  qa('.filters button').forEach(b=>b.onclick=()=>{hist.group=b.dataset.g; hist.limit=200; render();});
+  const wire=(id,key,ev)=>{ const el=q(id); if(!el)return;
+    el.addEventListener(ev,()=>{ hist[key]=el.value; hist.limit=200; renderHistList();
+      const r=q('.hfilt .mini-btn'); if(!r&&(hist.q||hist.machineId||hist.materialId||hist.from||hist.to)) render(); }); };
+  wire('#hQ','q','input'); wire('#hMach','machineId','change'); wire('#hMat','materialId','change');
+  wire('#hFrom','from','change'); wire('#hTo','to','change');
+  renderHistList();
 }
 
 function vNastaveni(){
@@ -1060,6 +1206,7 @@ function vNastaveni(){
     <input class="inp" id="dryDays" type="text" inputmode="numeric" value="${state.settings.dryingWarnDays}" onchange="setDryDays(this.value)"></label>`)}
   ${P_('data','Data a zálohy',`<p class="tnote" style="margin:0 0 14px">Data žijí jen v tomto zařízení. Zálohu exportujte na konci směny.</p>
     <div class="settings-actions"><button class="btn" onclick="exportData()">Exportovat zálohu</button>
+    <button class="btn secondary" onclick="kontrolaKonzistence()">Zkontrolovat časovou osu</button>
     <button class="btn secondary" onclick="q('#importFile').click()">Importovat zálohu</button>
     <button class="btn danger" onclick="resetAll()">Vymazat vše</button></div>
     <input type="file" id="importFile" accept="application/json,.json" class="hide" onchange="importData(this.files[0])">`)}`;
@@ -1275,79 +1422,146 @@ function opDrazky(machineId){
     fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
     fld('Vrstva, ve které změna proběhla',numInput('fLayer',null,'číslo vrstvy'))+
     `<div id="grw"></div>`+
-    `<div class="computed est"><span class="k">Spotřeba zafixovaná do této vrstvy</span><span class="v" id="cv">—</span></div>`+
+    `<div class="computed est"><span class="k">Spotřeba do této vrstvy</span><span class="v" id="cv">—</span></div>`+
     opField(),
     ()=>{
       const op=readOp(); if(!op)return false;
       const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j){mErr('Stroj netiskne.');return false;}
-      const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value));
-      if(!layer&&layer!==0){mErr('Zadejte číslo vrstvy.');return false;}
-      if(layer<s.startLayer){mErr(`Vrstva musí být alespoň ${fmtInt(s.startLayer)} (začátek aktuálního úseku).`);return false;}
+      const s=curChange(j), layer=Math.round(parseNum(q('#fLayer').value));
+      if(isNaN(layer)){mErr('Zadejte číslo vrstvy.');return false;}
+      if(layer<=s.layer){mErr(`Vrstva musí být vyšší než ${fmtInt(s.layer)} — tam začíná současné dávkování.`);return false;}
       if(layer>j.totalLayers){mErr(`Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`);return false;}
       const gS=q('#fGr'); if(!gS||gS.disabled){mErr('Není dostupná jiná konfigurace.');return false;}
       const cfg=findConfig(mc.id,j.materialId,j.layerHeight,parseNum(gS.value));
       if(!cfg){mErr('Konfigurace nenalezena.');return false;}
       if(cfg.grooves===s.grooves){mErr('Zvolte jiné dávkování.');return false;}
-      pushUndo(`Změna drážek na ${mc.name} (${s.grooves} → ${cfg.grooves})`);
+      pushUndo(`Změna dávkování na ${mc.name} (${s.grooves} → ${cfg.grooves})`);
       const ts=now(), before=s.grooves;
-      s.endLayer=layer; s.endTs=ts;
-      j.segments.push({configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate,
-        startLayer:layer,startTs:ts,endLayer:null,endTs:null});
+      j.changes.push({layer,configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate});
+      j.readings=j.readings||[]; j.readings.push({ts,layer});    // zadaná vrstva je zároveň odečet
       addEvent({type:'job_change',ts,machineId:mc.id,jobId:j.id,layer,from:before,to:cfg.grooves,
         consumed:jobConsumedTotal(j),operatorId:op});
       save(); toast(`Dávkování ${before} → ${cfg.grooves} od vrstvy ${fmtInt(layer)}`);
     },'Uložit změnu','est');
   const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
-    const s=lastSeg(j), cl=Math.round(currentLayer(j));
-    q('#mi').innerHTML=`<div class="modal-info est">Aktuálně dávkování <b>${s.grooves}</b> · odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · výška ${j.layerHeight} µm</div>`;
+    const s=curChange(j), cl=Math.round(currentLayer(j));
+    q('#mi').innerHTML=`<div class="modal-info est">Aktuálně dávkování <b>${s?s.grooves:'—'}</b> · odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · výška ${j.layerHeight} µm</div>`;
     const li=q('#fLayer'); if(!li.value) li.value=cl;
-    const gs=groovesFor(mc.id,j.materialId,j.layerHeight).filter(g=>g!==s.grooves);
+    const gs=groovesFor(mc.id,j.materialId,j.layerHeight).filter(g=>g!==(s?s.grooves:null));
     q('#grw').innerHTML=gs.length
       ? fld('Nové dávkování',`<select class="inp" id="fGr">${gs.map(g=>`<option value="${g}">${g}</option>`).join('')}</select>`)
       : `<div class="modal-info danger">Pro tuto výšku vrstvy není jiná konfigurace. Přidejte ji v Nastavení.</div>`;
     upd(); };
   const upd=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
-    const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value));
-    let done=0; for(const sg of j.segments) if(sg!==s) done+=segConsumed(j,sg,sg.startTs,segEndTs(j,sg));
-    const cv=q('#cv');
-    if(isNaN(layer)||layer<s.startLayer){cv.textContent='—';return;}
-    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*layerMass(s))+' g'; };
+    const layer=Math.round(parseNum(q('#fLayer').value)), cv=q('#cv');
+    if(isNaN(layer)||layer<0){cv.textContent='—';return;}
+    cv.textContent='~'+fmtG(consumedUpTo(j,clamp(layer,0,j.totalLayers)))+' g'; };
   q('#fMach').onchange=refresh; q('#fLayer').addEventListener('input',upd); refresh();
 }
 
-function opStop(machineId){
-  const jobs=state.jobs.filter(j=>j.status==='running');
-  if(!jobs.length){ toast('Žádný stroj právě netiskne.',true); return; }
-  const mid=pickMach(machineId,jobs.map(j=>machById(j.machineId)));
-  openModal('stop','Stop tiskové úlohy',
-    fld('Stroj',machSelect('fMach',m=>!!runningJob(m.id),mid))+`<div id="mi"></div>`+
-    fld('Vrstva, ve které tisk skončil',numInput('fLayer',null,'číslo vrstvy'),'Předvyplněno odhadem z odpočtu — přepište skutečnou hodnotou.')+
-    `<div class="computed est"><span class="k">Celková spotřeba úlohy (odhad)</span><span class="v" id="cv">—</span></div>`+
+/* ===================== uzavření a dodatečná oprava průběhu tisku =====================
+   Jeden dialog pro obojí: při Stopu i zpětně. Obsluha zadá skutečnou poslední vrstvu
+   a seznam změn dávkování podle reality — spotřeba se celá přepočítá z os vrstev,
+   takže není potřeba nic rušit tlačítkem Zpět a znovu zakládat. */
+let jobRows=[], jobCtx=null;
+function jobRowsHtml(){
+  const j=jobCtx.job, gs=groovesFor(j.machineId,j.materialId,j.layerHeight);
+  if(!gs.length) return `<div class="modal-info danger">Pro tento stroj, materiál a výšku vrstvy nejsou konfigurace.</div>`;
+  return jobRows.map((r,i)=>`<div class="jrow">
+    ${i===0?`<div class="tnote">od vrstvy 0</div>`
+      :`<input class="inp" data-i="${i}" data-k="layer" type="text" inputmode="numeric" value="${r.layer}" placeholder="od vrstvy">`}
+    <select class="inp" data-i="${i}" data-k="grooves">${gs.map(g=>`<option value="${g}" ${g===r.grooves?'selected':''}>dávkování ${g}</option>`).join('')}</select>
+    ${i===0?'<span></span>':`<button class="mini-btn danger" onclick="jobRowDel(${i})">×</button>`}</div>`).join('');
+}
+function jobRowsBind(){
+  const box=q('#jrows'); if(!box)return;
+  box.innerHTML=jobRowsHtml();
+  qa('#jrows [data-k]').forEach(el=>{
+    const i=+el.dataset.i, k=el.dataset.k;
+    el.addEventListener(k==='grooves'?'change':'input',()=>{
+      jobRows[i][k]=k==='grooves'?parseNum(el.value):Math.round(parseNum(el.value));
+      jobCalc(); });
+  });
+  jobCalc();
+}
+function jobRowAdd(){
+  const last=jobRows[jobRows.length-1];
+  jobRows.push({layer:(last?last.layer:0)+1,grooves:last?last.grooves:0});
+  jobRowsBind();
+}
+function jobRowDel(i){ jobRows.splice(i,1); jobRowsBind(); }
+function jobBuild(){                       // vrátí {changes,endLayer} nebo {err}
+  const j=jobCtx.job;
+  const endLayer=Math.round(parseNum(q('#fEnd').value));
+  if(isNaN(endLayer)||endLayer<0) return {err:'Zadejte poslední vrstvu.'};
+  if(endLayer>j.totalLayers) return {err:`Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`};
+  const changes=[]; let prev=-1;
+  for(let i=0;i<jobRows.length;i++){
+    const r=jobRows[i], layer=i===0?0:r.layer;
+    if(isNaN(layer)) return {err:'Vyplňte vrstvu u každé změny dávkování.'};
+    if(layer<=prev) return {err:`Vrstvy změn musí růst — ${fmtInt(layer)} není víc než ${fmtInt(prev)}.`};
+    if(layer>j.totalLayers) return {err:`Změna ve vrstvě ${fmtInt(layer)} je nad rámec úlohy.`};
+    const cfg=findConfig(j.machineId,j.materialId,j.layerHeight,r.grooves);
+    if(!cfg) return {err:`Pro dávkování ${r.grooves} není konfigurace.`};
+    changes.push({layer,configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate});
+    prev=layer;
+  }
+  if(!changes.length) return {err:'Musí být alespoň jedno dávkování.'};
+  return {changes,endLayer};
+}
+function jobCalc(){
+  const cv=q('#cv'); if(!cv)return;
+  const b=jobBuild();
+  if(b.err){ cv.textContent='—'; return; }
+  const probe={...jobCtx.job,changes:b.changes};
+  cv.textContent='~'+fmtG(consumedUpTo(probe,b.endLayer))+' g';
+}
+function opUzavrit(machineId,jobId){
+  let j=jobId?state.jobs.find(x=>x.id===jobId):runningJob(machineId);
+  if(!j){ const run=state.jobs.filter(x=>x.status==='running');
+    if(!run.length){ toast('Žádná tisková úloha k uzavření.',true); return; }
+    j=run[0]; }
+  const mc=machById(j.machineId); if(!mc){ toast('Stroj neexistuje.',true); return; }
+  jobCtx={job:j};
+  jobRows=(j.changes||[]).slice().sort((a,b)=>a.layer-b.layer).map(c=>({layer:c.layer,grooves:c.grooves}));
+  if(!jobRows.length) jobRows=[{layer:0,grooves:(groovesFor(j.machineId,j.materialId,j.layerHeight)[0]||0)}];
+  const bezi=j.status==='running';
+  const defEnd=bezi?Math.round(currentLayer(j)):j.endLayer;
+  /* kalibrace, která už tuhle úlohu zahrnula, si drží vlastní čísla */
+  const calLocked=state.calibrations.some(c=>c.kind==='doser'&&c.machineId===j.machineId&&c.ts>=(j.endTs||j.startTs));
+  openModal('stop',bezi?'Uzavření tisku':'Oprava průběhu tisku',
+    `<div class="modal-info"><span class="k">${esc(mc.name)} · ${esc((matById(j.materialId)||{}).name||'')} ·
+      ${fmtInt(j.totalLayers)} vrstev · ${j.layerHeight} µm · start ${fmtDate(j.startTs)} ${fmtTime(j.startTs)}</span></div>`+
+    (calLocked?`<div class="modal-info warn">Na tuhle sérii už proběhla kalibrace dávkovače. Oprava se projeví
+      v dalším kalibračním okně, ale hodnotu, která je už zapsaná v konfiguracích, nezmění.</div>`:'')+
+    fld(bezi?'Vrstva, ve které tisk skutečně skončil':'Poslední vytištěná vrstva',numInput('fEnd',defEnd,''),
+      bezi?'Předvyplněno odhadem — přepište podle stroje.':'')+
+    fld('Průběh dávkování',`<div id="jrows"></div>
+      <button class="mini-btn" style="margin-top:8px" onclick="jobRowAdd()">+ přidat změnu dávkování</button>`,
+      'Zadejte vrstvy podle skutečnosti, i ty, které se během tisku nestihly zapsat.')+
+    `<div class="computed est"><span class="k">Spotřeba úlohy (odhad)</span><span class="v" id="cv">—</span></div>`+
     opField(),
     ()=>{
       const op=readOp(); if(!op)return false;
-      const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j){mErr('Stroj netiskne.');return false;}
-      const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value));
-      if(isNaN(layer)){mErr('Zadejte číslo vrstvy.');return false;}
-      if(layer<s.startLayer){mErr(`Vrstva musí být alespoň ${fmtInt(s.startLayer)}.`);return false;}
-      if(layer>j.totalLayers){mErr(`Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`);return false;}
-      pushUndo(`Konec tisku na ${mc.name}`);
-      const ts=now(); s.endLayer=layer; s.endTs=ts;
-      j.status='done'; j.endTs=ts; j.endLayer=layer; j.finish='manual';
-      addEvent({type:'job_stop',ts,machineId:mc.id,jobId:j.id,layer,consumed:jobConsumedTotal(j),operatorId:op});
-      save(); toast(`Tisk ukončen ve vrstvě ${fmtInt(layer)}`);
-    },'Ukončit tisk','est');
-  const refresh=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
-    const cl=Math.round(currentLayer(j));
-    q('#mi').innerHTML=`<div class="modal-info est">Odhad vrstvy <b>${fmtInt(cl)}</b> z ${fmtInt(j.totalLayers)} · uplynulo ${fmtDur(now()-j.startTs)} z ${fmtDur(j.totalMs)}</div>`;
-    const li=q('#fLayer'); li.value=cl; upd(); };
-  const upd=()=>{ const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j)return;
-    const s=lastSeg(j), layer=Math.round(parseNum(q('#fLayer').value)), cv=q('#cv');
-    if(isNaN(layer)||layer<s.startLayer){cv.textContent='—';return;}
-    let done=0; for(const sg of j.segments) if(sg!==s) done+=segConsumed(j,sg,sg.startTs,segEndTs(j,sg));
-    cv.textContent='~'+fmtG(done+Math.max(0,layer-s.startLayer)*layerMass(s))+' g'; };
-  q('#fMach').onchange=refresh; q('#fLayer').addEventListener('input',upd); refresh();
+      const b=jobBuild(); if(b.err){mErr(b.err);return false;}
+      pushUndo(bezi?`Uzavření tisku na ${mc.name}`:`Oprava průběhu tisku na ${mc.name}`);
+      const puvodni=j.endLayer, zmen=(j.changes||[]).length;
+      j.changes=b.changes; j.endLayer=b.endLayer;
+      if(bezi){ j.status='done'; j.endTs=now(); j.finish='manual'; }
+      else j.edited=true;
+      j.confirmed=true;
+      /* odečty nad koncovou vrstvu by křivku táhly za konec */
+      j.readings=(j.readings||[]).filter(r=>r.layer<=b.endLayer);
+      addEvent({type:bezi?'job_stop':'job_edit',machineId:mc.id,jobId:j.id,layer:b.endLayer,
+        consumed:jobConsumedTotal(j),operatorId:op,
+        from:bezi?undefined:puvodni,changes:b.changes.length,prevChanges:zmen});
+      save(); toast(bezi?`Tisk uzavřen ve vrstvě ${fmtInt(b.endLayer)}`:`Průběh opraven — vrstva ${fmtInt(b.endLayer)}`);
+    },bezi?'Uzavřít tisk':'Uložit opravu','est');
+  const fe=q('#fEnd'); if(fe) fe.addEventListener('input',jobCalc);
+  jobRowsBind();
 }
+const lastUnconfirmed=mid=>state.jobs.filter(j=>j.machineId===mid&&j.status==='done'&&j.confirmed===false)
+  .sort((a,b)=>b.endTs-a.endTs)[0]||null;
 
 /* ===================== MODUL 1 — operace ===================== */
 function opPrijem(){
@@ -1744,7 +1958,7 @@ function edConfig(id){
       else state.configs.push({id:uid(),machineId:mid,materialId:mat,layerHeight:h,grooves:gr,massPerGroove:mg,fillRate:fr});
       save(); toast('Konfigurace uložena'); });
 }
-function delConfig(id){ if(state.jobs.some(j=>j.status==='running'&&j.segments.some(s=>s.configId===id))){
+function delConfig(id){ if(state.jobs.some(j=>j.status==='running'&&(j.changes||[]).some(c=>c.configId===id))){
     toast('Konfiguraci právě používá běžící tisk.',true); return; }
   if(!confirm('Smazat tuto konfiguraci?'))return;
   state.configs=state.configs.filter(c=>c.id!==id); save(); }
@@ -1799,6 +2013,32 @@ function delOperator(id){ if(!confirm('Smazat tuto obsluhu? Historie zůstane za
   state.operators=state.operators.filter(o=>o.id!==id);
   if(state.currentOperatorId===id) state.currentOperatorId=state.operators[0]?state.operators[0].id:null; save(); }
 function setDryDays(v){ const n=parseInt(v,10); state.settings.dryingWarnDays=isNaN(n)?0:Math.max(0,n); save(); }
+
+/* ===================== kontrola konzistence =====================
+   Přehraje pohyby chronologicky a hlásí okamžik, kdy by některé místo šlo do záporu.
+   Zdroje mimo evidenci (dodavatel, korekce) do záporu jít mají, ty se přeskakují.
+   Je to zároveň podmínka, kterou bude muset splnit zpětný zápis operací. */
+function timelineProblems(){
+  const evs=[...state.movements].sort((a,b)=>a.ts-b.ts);
+  const bal={}, bad=[];
+  const skip=new Set([L.SUPPLIER,L.CORR,L.WASTE,L.DISPOSAL,L.PARTS]);
+  for(const m of evs){
+    bal[m.to]=(bal[m.to]||0)+m.amount; bal[m.from]=(bal[m.from]||0)-m.amount;
+    for(const loc of [m.from,m.to]){
+      if(skip.has(loc)||!loc)continue;
+      if((bal[loc]||0)<-EPS) bad.push({ts:m.ts,loc,value:r1(bal[loc]),type:m.type});
+    }
+  }
+  const seen=new Set(), uniq=[];
+  for(const b of bad){ if(seen.has(b.loc))continue; seen.add(b.loc); uniq.push(b); }
+  return uniq;
+}
+function kontrolaKonzistence(){
+  const bad=timelineProblems();
+  if(!bad.length){ toast('Časová osa je v pořádku — žádné místo nejde do záporu.'); return; }
+  const txt=bad.slice(0,6).map(b=>`• ${locName(b.loc)}: ${fmtG(b.value)} g dne ${fmtDate(b.ts)}`).join('\n');
+  alert(`Nalezeno ${bad.length} míst se záporným stavem v čase:\n\n${txt}\n\nKonečné součty mohou být v pořádku — jde o pořadí zápisů.`);
+}
 
 /* ===================== data ===================== */
 function exportData(){
