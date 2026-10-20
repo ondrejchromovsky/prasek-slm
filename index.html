@@ -407,7 +407,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.13 · sklad, odhady, kalibrace</span><span class="sep"></span>
+  <span>v3.14 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -495,6 +495,24 @@ function defaultState(){
     ui:{lastMachineId:null,lastMaterialId:null},
     settings:{dryingWarnDays:14}, currentOperatorId:op };
 }
+function normalizeJob(j){
+  if(!j.changes){
+    const segs=j.segments||[];
+    j.changes=segs.map(sg=>({layer:sg.startLayer||0,configId:sg.configId,grooves:sg.grooves,
+      massPerGroove:sg.massPerGroove,fillRate:sg.fillRate}));
+    /* hranice úseků byly dosud i časovými kotvami — zachováme je jako odečty,
+       aby se křivka starých úloh nezměnila */
+    const r=(j.readings||[]).slice();
+    segs.forEach(sg=>{ if(sg.endTs!=null&&sg.endLayer!=null&&!r.some(x=>x.ts===sg.endTs))
+      r.push({ts:sg.endTs,layer:sg.endLayer}); });
+    j.readings=r.sort((a,b)=>a.ts-b.ts);
+  }
+  delete j.segments;
+  if(!Array.isArray(j.readings)) j.readings=[];
+  if(j.status!=='running'&&j.confirmed===undefined) j.confirmed=true;
+  if(j.status==='running'&&j.confirmed===undefined) j.confirmed=false;
+  return j;
+}
 function migrate(s){
   s.materials=s.materials||[]; s.operators=s.operators||[]; s.batches=s.batches||[]; s.containers=s.containers||[];
   s.movements=s.movements||[]; s.events=s.events||[]; s.voids=s.voids||[]; s.undo=s.undo||[];
@@ -520,23 +538,11 @@ function migrate(s){
     s.version=4;
   }
   if(s.version<5){ s.version=5; }
-  if(s.version<6){          // průběh tisku: řetěz časových úseků -> osa vrstev
-    (s.jobs||[]).forEach(j=>{
-      if(j.changes) return;
-      const segs=j.segments||[];
-      j.changes=segs.map(sg=>({layer:sg.startLayer||0,configId:sg.configId,grooves:sg.grooves,
-        massPerGroove:sg.massPerGroove,fillRate:sg.fillRate}));
-      /* hranice úseků byly dosud i časovými kotvami — zachováme je jako odečty,
-         aby se křivka starých úloh nezměnila */
-      const r=(j.readings||[]).slice();
-      segs.forEach(sg=>{ if(sg.endTs!=null&&sg.endLayer!=null&&!r.some(x=>x.ts===sg.endTs))
-        r.push({ts:sg.endTs,layer:sg.endLayer}); });
-      j.readings=r.sort((a,b)=>a.ts-b.ts);
-      if(j.status!=='running') j.confirmed=true;   // staré uzavřené bereme jako potvrzené
-      delete j.segments;
-    });
-    s.version=6;
-  }
+  if(s.version<6) s.version=6;
+  /* Samooprava úlohy. Běží VŽDY, ne jen při povýšení verze — kdyby některá cesta
+     založila úlohu po staru (se segmenty) nebo bez značek, tohle ji srovná při
+     příštím načtení, místo aby stroj ukazoval nulové dávkování. */
+  (s.jobs||[]).forEach(normalizeJob);
   return s;
 }
 const matById=id=>state.materials.find(m=>m.id===id);
@@ -1384,8 +1390,8 @@ function opStart(machineId){
       const ts=now();
       const job={id:uid(),machineId:mc.id,materialId:mc.materialId,startTs:ts,totalMs,totalLayers:layers,
         layerHeight:cfg.layerHeight,status:'running',endTs:null,endLayer:null,operatorId:op,
-        segments:[{configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate,
-          startLayer:0,startTs:ts,endLayer:null,endTs:null}]};
+        readings:[],confirmed:false,
+        changes:[{layer:0,configId:cfg.id,grooves:cfg.grooves,massPerGroove:cfg.massPerGroove,fillRate:cfg.fillRate}]};
       state.jobs.push(job);
       addEvent({type:'job_start',ts,machineId:mc.id,jobId:job.id,totalLayers:layers,layerHeight:cfg.layerHeight,
         grooves:cfg.grooves,operatorId:op});
@@ -1428,6 +1434,7 @@ function opDrazky(machineId){
       const op=readOp(); if(!op)return false;
       const mc=machById(q('#fMach').value), j=runningJob(mc.id); if(!j){mErr('Stroj netiskne.');return false;}
       const s=curChange(j), layer=Math.round(parseNum(q('#fLayer').value));
+      if(!s){mErr('Úloha nemá zadané dávkování. Opravte ji přes Uzavření tisku.');return false;}
       if(isNaN(layer)){mErr('Zadejte číslo vrstvy.');return false;}
       if(layer<=s.layer){mErr(`Vrstva musí být vyšší než ${fmtInt(s.layer)} — tam začíná současné dávkování.`);return false;}
       if(layer>j.totalLayers){mErr(`Úloha má jen ${fmtInt(j.totalLayers)} vrstev.`);return false;}
