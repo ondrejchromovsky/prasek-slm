@@ -407,7 +407,7 @@ footer .sep{width:1px; height:12px; background:var(--line-strong)}
 <footer>
   <span>Data uložena jen v tomto zařízení</span><span class="sep"></span>
   <span id="storeMode">IndexedDB</span><span class="sep"></span>
-  <span>v3.14 · sklad, odhady, kalibrace</span><span class="sep"></span>
+  <span>v3.15 · sklad, odhady, kalibrace</span><span class="sep"></span>
   <span id="lastSaved"></span>
 </footer>
 
@@ -824,7 +824,8 @@ const ico=(n,s)=>`<svg width="${s||22}" height="${s||22}" viewBox="0 0 24 24" fi
 const TYPE={ prijem:{l:'Příjem',c:'in'}, naplneni:{l:'Naplnění stroje',c:'machine'},
   odebrani_prepadu:{l:'Odebrání přepadů',c:'move'}, preseti:{l:'Přesetí',c:'move'},
   flasky_prazdne:{l:'Flašky prázdné',c:'loss'}, vyprazdneni:{l:'Vyprázdnění stroje',c:'move'},
-  zmena_materialu:{l:'Změna materiálu',c:'loss'}, korekce:{l:'Korekce stroje',c:'adjust'} };
+  zmena_materialu:{l:'Změna materiálu',c:'loss'}, korekce:{l:'Korekce stroje',c:'adjust'},
+  korekce_skladu:{l:'Korekce skladu',c:'adjust'} };
 function locName(loc){
   if(loc===L.SUPPLIER)return'Dodavatel'; if(loc===L.WASTE)return'Odpad'; if(loc===L.DISPOSAL)return'Likvidace';
   if(loc===L.CORR)return'Korekce'; if(loc===L.PARTS)return'Hotové díly'; if(!loc)return'—';
@@ -952,7 +953,8 @@ function vSklad(){
       ${rows}
       <div class="matblock-foot"><span>Naplněných <b>${cs.filter(c=>cMass(b,c.id)>EPS).length}/${cs.length}</b></span>
         <span>Celkem v oběhu <b>${fmtG(sklad+bott+mm)} g</b></span>
-        ${onM.length?`<span>Nasazeno v: <b>${onM.map(m=>esc(m.name)).join(', ')}</b></span>`:''}</div></div>`;
+        ${onM.length?`<span>Nasazeno v: <b>${onM.map(m=>esc(m.name)).join(', ')}</b></span>`:''}
+        <button class="mini-btn" style="margin-left:auto" onclick="opKorekceSklad('${mat.id}')">Opravit hmotnost</button></div></div>`;
   }).join('');
   return `<div class="viewhead"><h2>Sklad</h2><span class="sub">Všechny kontejnery podle materiálu.</span></div>${blocks}`;
 }
@@ -976,7 +978,8 @@ function vOperace(){
     <div class="op-group">Recyklace</div>
     ${mk('opPreseti()','preseti','Přesetí','Z flašek do stroje nebo kontejneru (váží se výstup)')}
     ${mk('opFlaskyPrazdne()','flasky','Flašky prázdné','Vynulovat flašky — zbytek je odpad z přesévání','warn-op')}
-    <div class="op-group">Uzávěrky stroje</div>
+    <div class="op-group">Uzávěrky a korekce</div>
+    ${mk('opKorekceSklad()','korekce','Ruční korekce skladu','Srovnat hmotnost kontejneru na zváženou','danger-op')}
     ${mk('opZmena()','zmena','Změna materiálu','Odepsat zbytek a nasadit jiný materiál','warn-op')}
     ${mk('opKorekce()','korekce','Ruční korekce stroje','Srovnat evidenci na zvážený stav (servis)','danger-op')}
   </div>`;
@@ -1093,9 +1096,9 @@ function histNorm(){
   }
   for(const m of state.movements){
     const t=TYPE[m.type]||{l:m.type,c:'move'}, mat=matById(m.materialId), w=who(m.operatorId);
-    const loss=m.to===L.WASTE, gain=m.from===L.CORR;
+    const loss=m.to===L.WASTE, corr=m.to===L.CORR, gain=m.from===L.CORR;
     const g=[]; 
-    if(['prijem','preseti'].includes(m.type)) g.push('sklad');
+    if(['prijem','preseti','korekce_skladu'].includes(m.type)) g.push('sklad');
     if(['naplneni','odebrani_prepadu','vyprazdneni','zmena_materialu','korekce'].includes(m.type)) g.push('stroj');
     if(loss) g.push('odpad');
     if(!g.length) g.push('jine');
@@ -1103,7 +1106,7 @@ function histNorm(){
       chips:`<span class="tchip ${t.c}">${t.l}</span>${mat?matMini(mat):''}`,
       flow:`<b>${esc(locName(m.from))}</b> → <b>${esc(locName(m.to))}</b>`,
       note:(m.note?m.note+' · ':'')+w,
-      amt:(loss?'−':(gain?'+':''))+fmtG(m.amount),amtCls:loss?'neg':(gain?'pos':''),rowCls:'',
+      amt:((loss||corr)?'−':(gain?'+':''))+fmtG(m.amount),amtCls:(loss||corr)?'neg':(gain?'pos':''),rowCls:'',
       text:[t.l,mat?mat.name:'',locName(m.from),locName(m.to),m.note||'',w,fmtG(m.amount),m.amount].join(' ')});
   }
   return out.sort((a,b)=>b.ts-a.ts);
@@ -1793,7 +1796,7 @@ function opKorekce(){
       const diff=r1(meas-book);
       if(Math.abs(diff)<=EPS&&(q('#fKeep').checked||!mc.materialId)){mErr('Evidence i skutečnost se shodují — není co opravit.');return false;}
       pushUndo(`Korekce ${mc.name} na ${fmtG(meas)} g`);
-      if(diff<-EPS) addMovement({type:'korekce',from:MACH(mc.id),to:L.WASTE,amount:-diff,materialId:mc.materialId,machineId:mc.id,operatorId:op,note:'korekce (−)',meas});
+      if(diff<-EPS) addMovement({type:'korekce',from:MACH(mc.id),to:L.CORR,amount:-diff,materialId:mc.materialId,machineId:mc.id,operatorId:op,note:'korekce (−)',meas});
       else if(diff>EPS) addMovement({type:'korekce',from:L.CORR,to:MACH(mc.id),amount:diff,materialId:mc.materialId,machineId:mc.id,operatorId:op,note:'korekce (+)',meas});
       if(!q('#fKeep').checked) mc.materialId=null;
       save(); toast(`${mc.name}: stav srovnán na ${fmtG(meas)} g`); },'Srovnat stav','danger');
@@ -1941,6 +1944,55 @@ function opKalPrepady(mid,configId){
     q('#av').textContent=a&&a.avg!=null?fmt1(a.avg)+' g/h  ('+a.n+' měření)':'—'; };
   ['fM','fD','fH','fMi'].forEach(id=>q('#'+id).addEventListener('input',upd));
   q('#fCfg').onchange=upd; upd();
+}
+
+function opKorekceSklad(materialId){
+  if(!state.containers.length){toast('Nejdřív přidejte kontejnery v Nastavení.',true);return;}
+  const first=pickMat(materialId,state.materials);
+  openModal('korekce','Ruční korekce skladu',
+    `<div class="modal-info danger">Pro případ, kdy se evidovaná hmotnost kontejneru rozejde se skutečností.
+      Rozdíl se zapíše jako oprava, ne jako odpad.</div>`+
+    fld('Materiál',matSelect('fMat',null,first))+
+    `<div id="cw">${fld('Kontejner',contSelect('fCont',first))}</div><div id="ci"></div>`+
+    fld('Skutečně zvážená hmotnost',gInput('fG'))+
+    `<div class="computed"><span class="k">Rozdíl proti evidenci</span><span class="v" id="dv">—</span></div>`+
+    fld('Důvod (nepovinné)',`<input class="inp" id="fNote" placeholder="např. přesypání, chyba váhy">`)+
+    opField(),
+    ()=>{
+      const op=readOp(); if(!op)return false;
+      const cs=q('#fCont'); if(!cs||cs.disabled||!cs.value){mErr('Vyberte kontejner.');return false;}
+      const c=contById(cs.value), book=cMass(balances(),c.id);
+      const meas=parseG(q('#fG').value);
+      if(isNaN(meas)||meas<0){mErr('Zadejte zváženou hmotnost (0 nebo více).');return false;}
+      const diff=r1(meas-book);
+      if(Math.abs(diff)<=EPS){mErr('Evidence i skutečnost se shodují — není co opravit.');return false;}
+      if(book<=EPS&&diff>0){mErr('Kontejner je v evidenci prázdný. Použijte Příjem nebo Přesetí, aby se zaevidovala šarže.');return false;}
+      if(!confirm(`Kontejner č. ${c.number}\n\nevidence ${fmtG(book)} g → skutečnost ${fmtG(meas)} g\nrozdíl ${diff>0?'+':''}${fmtG(diff)} g\n\nZapsat opravu?`))return false;
+      const note=q('#fNote').value.trim();
+      pushUndo(`Korekce kontejneru č. ${c.number} na ${fmtG(meas)} g`);
+      if(diff<0) addMovement({type:'korekce_skladu',from:CONT(c.id),to:L.CORR,amount:-diff,materialId:c.materialId,
+        containerId:c.id,batchId:c.batchId,operatorId:op,note:note||'korekce (−)',meas});
+      else addMovement({type:'korekce_skladu',from:L.CORR,to:CONT(c.id),amount:diff,materialId:c.materialId,
+        containerId:c.id,batchId:c.batchId,operatorId:op,note:note||'korekce (+)',meas});
+      if(meas<=EPS){ c.batchId=null; c.dryingDate=null; }   // prázdný kontejner už nedrží šarži
+      save(); toast(`Kontejner č. ${c.number} srovnán na ${fmtG(meas)} g`);
+    },'Srovnat stav','danger');
+  const info=()=>{ const cs=q('#fCont'), box=q('#ci');
+    if(!cs||cs.disabled||!cs.value){ box.innerHTML=''; return; }
+    const c=contById(cs.value), book=cMass(balances(),c.id), bt=batchById(c.batchId);
+    box.innerHTML=`<div class="modal-info"><span class="k">Eviduje se:</span> <b>${fmtG(book)} g</b>`+
+      (bt?` · <span class="k">šarže</span> <b>${esc(bt.code)}</b>`:'')+
+      (c.dryingDate?` · <span class="k">vysušeno</span> <b>${fmtDate(new Date(c.dryingDate+'T00:00:00').getTime())}</b>`:'')+`</div>`;
+    upd(); };
+  const upd=()=>{ const cs=q('#fCont'), dv=q('#dv'); if(!dv)return;
+    if(!cs||cs.disabled||!cs.value){ dv.textContent='—'; return; }
+    const book=cMass(balances(),cs.value), meas=parseG(q('#fG').value);
+    if(isNaN(meas)||meas<0){ dv.textContent='—'; dv.className='v'; return; }
+    const d=r1(meas-book);
+    dv.textContent=(d>0?'+':'')+fmtG(d)+' g'; dv.className='v'+(d<0?' neg':''); };
+  const bind=()=>{ const cs=q('#fCont'); if(cs&&!cs.disabled) cs.onchange=info; info(); };
+  q('#fMat').onchange=function(){ q('#cw').innerHTML=fld('Kontejner',contSelect('fCont',this.value)); bind(); };
+  q('#fG').addEventListener('input',upd); bind();
 }
 
 /* ===================== Nastavení ===================== */
